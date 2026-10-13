@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0e5a63">
+<!-- このページが読みこむプログラムは、このサイト自身のものだけ。連絡する相手は、Google 側の中継プログラムだけ。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'">
+<title>多言語通訳ルーム</title>
+<link rel="icon" href="images/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/styles.css?v=0.2.0">
+</head>
+<body>
+<div id="app" lang="ja">
+  <section id="join" class="join" aria-labelledby="join-title">
+    <h1 id="join-title" data-t="title">多言語通訳ルーム</h1>
+    <p class="lead" data-t="lead">自分の言語で話すか書くと、相手にはそれぞれの言語で届きます。</p>
+    <p class="setup" id="setup-note" data-t="setupNeeded" hidden></p>
+    <form id="join-form" class="form" novalidate>
+      <fieldset class="field">
+        <legend class="lab" data-t="yourLang">あなたの言語</legend>
+        <div class="langs" id="langs"></div>
+      </fieldset>
+      <div class="field">
+        <label class="lab" for="name" data-t="yourName">表示名</label>
+        <input class="text" id="name" name="name" type="text" maxlength="40" autocomplete="nickname" enterkeyhint="go">
+      </div>
+      <div class="field" id="pass-field" hidden>
+        <label class="lab" for="pass" data-t="passLabel">合言葉</label>
+        <input class="text mono" id="pass" name="room-pass" type="text" maxlength="40" inputmode="email" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" lang="en">
+        <p class="fine" data-t="passHint"></p>
+      </div>
+      <p class="fine" id="pass-saved" hidden><span data-t="passSaved"></span> <button class="link" id="pass-change" type="button" data-t="passChange"></button></p>
+      <p class="fine err" id="pass-error" role="alert" hidden></p>
+      <button class="primary" id="join-btn" type="submit">参加する</button>
+      <p class="fine" id="create-lead" data-t="createLead" hidden></p>
+      <p class="fine" data-t="note">発言は翻訳のためにGoogleに送られ、訳と一緒にこのルームに数時間残ります。</p>
+    </form>
+    <div class="sample">
+      <span class="lab" data-t="example">表示例</span>
+      <div id="example"></div>
+    </div>
+  </section>
+
+  <section id="room" class="room" hidden>
+    <header class="bar">
+      <h1 data-t="title">多言語通訳ルーム</h1>
+      <button class="icon" id="speak-toggle" type="button" aria-pressed="true" data-t-label="readAloud">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      </button>
+      <button class="icon" id="invite-btn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20.5 14v.01M20.5 20.5v.01M14 20.5v.01M17.2 20.5v.01M20.5 17.2v.01"/></svg>
+        <span data-t="invite">招待</span>
+      </button>
+    </header>
+    <div class="people" id="people" hidden></div>
+    <div class="log" id="log">
+      <p class="state" id="state"></p>
+      <div class="list" id="list" aria-live="polite"></div>
+    </div>
+    <div class="closed" id="closed" role="status" hidden>
+      <p data-t="closed"></p>
+      <p class="fine err" id="closed-why" hidden></p>
+      <button class="link" id="closed-retry" type="button" data-t="retry" hidden></button>
+      <button class="link" id="host-open" type="button" data-t="hostOpen"></button>
+    </div>
+    <p class="notice" id="notice" role="status" hidden></p>
+    <form class="composer" id="composer">
+      <button class="mic" id="mic-btn" type="button" aria-pressed="false" data-t-label="micStart" hidden>
+        <svg class="wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+        <svg class="stop" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+      </button>
+      <textarea id="msg" name="msg" rows="1" maxlength="600" data-t-ph="composerPh" data-t-label="composerPh"></textarea>
+      <button class="send" id="send-btn" type="submit" disabled data-t-label="send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </form>
+  </section>
+
+  <dialog id="sheet" aria-labelledby="sheet-title">
+    <div class="sheet">
+      <div class="block">
+        <h2 id="sheet-title" data-t="invite" tabindex="-1" autofocus>招待</h2>
+        <p data-t="inviteLead"></p>
+        <div class="qr" id="qr"></div>
+        <div class="linkrow">
+          <input class="text" id="link" name="link" type="text" readonly aria-label="URL">
+          <button class="ghost" id="copy-btn" type="button" data-t="copyLink"></button>
+        </div>
+        <p class="fine" data-t="inviteNote"></p>
+      </div>
+      <div class="block">
+        <button class="ghost" id="change-btn" type="button" data-t="changeLang"></button>
+        <button class="ghost" id="host-btn" type="button" data-t="hostBtn" hidden></button>
+        <form class="openform" id="open-form" novalidate hidden>
+          <label class="lab" for="open-pass" data-t="passLabel"></label>
+          <div class="passrow">
+            <input class="text mono" id="open-pass" name="room-pass" type="text" maxlength="40" inputmode="email" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" lang="en">
+            <button class="ghost" id="open-do" type="submit" data-t="openDo"></button>
+          </div>
+          <p class="fine err" id="open-error" role="alert" hidden></p>
+        </form>
+        <button class="ghost danger" id="clear-btn" type="button" data-t="clear" hidden></button>
+        <div class="confirm" id="clear-confirm" hidden>
+          <p data-t="clearAsk"></p>
+          <div class="row">
+            <button class="ghost danger" id="clear-do" type="button" data-t="clearDo"></button>
+            <button class="ghost" id="clear-cancel" type="button" data-t="cancel"></button>
+          </div>
+          <p class="fine" id="clear-error" data-t="clearFailed" hidden></p>
+        </div>
+        <button class="ghost" id="close-btn" type="button" data-t="close"></button>
+        <p class="tech" id="tech"></p>
+      </div>
+    </div>
+  </dialog>
+</div>
+
+<script src="config.js?v=0.2.0"></script>
+<script src="vendor/qrcode.js?v=0.2.0"></script>
+<script src="js/i18n.js?v=0.2.0"></script>
+<script src="js/api.js?v=0.2.0"></script>
+<script src="js/speech.js?v=0.2.0"></script>
+<script src="js/app.js?v=0.2.0"></script>
+</body>
+</html>
