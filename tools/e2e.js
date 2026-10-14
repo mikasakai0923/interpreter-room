@@ -459,6 +459,45 @@ const check = (name, ok, extra) => {
   await o.context().close();
   oldSite.close(); oldGas.server.close();
 
+  /* ---------- Gemini と用語集：聞き取りの誤りを直してから訳す ---------- */
+  const GLOSSARY = '分野: 記述言語学、少数言語・方言\n低資源言語 = low-resource language | 低資源語言 | 저자원 언어\n記述言語学 = descriptive linguistics\n';
+  const HEARD = '定資源元号を対象にした研究です。', FIXED = '低資源言語を対象にした研究です。';
+  const gGas = await startServer({ codePath: [path.join(ROOT, 'gas', 'Code.gs'), path.join(ROOT, 'gas', 'Gemini.gs')], props: { HOST_PASSWORD: PASS, GEMINI_API_KEY: 'TEST_KEY' } });
+  await fetch(gGas.url.replace('/exec', '/__control?') + 'glossary=' + encodeURIComponent(GLOSSARY));
+  const gSite = await startStatic(ROOT, 0, { '/config.js': 'window.IR_CONFIG = { apiUrl: ' + JSON.stringify(gGas.url) + ', pollScale: 0.2 };' });
+  const gBase = 'http://127.0.0.1:' + gSite.address().port + '/';
+  const gh = await person(gBase);
+  await gh.fill('#pass', PASS);
+  await joinAs(gh, 'ja', 'Mika');
+  await gh.waitForSelector('#sheet[open] #qr svg');
+  const gLink = await gh.inputValue('#link');
+  await gh.click('#close-btn');
+  const gl = await person(gLink);
+  await joinAs(gl, 'en', 'Alex');
+  await gh.waitForFunction(() => document.querySelectorAll('#people .chip').length === 2);
+  await gh.click('#mic-btn');
+  await gh.waitForFunction(() => window.__rec && document.querySelector('#mic-btn').classList.contains('on'));
+  await gh.evaluate(t => { window.__hear(t, true); window.__silence(); }, HEARD);
+  await waitMain(gl, 'This is a study of low-resource languages.');
+  const gFirst = gl.locator('#list .msg.other').first();
+  check('聞き手には、聞き取りの誤りを直した原文と、そこからの訳が届く', (await gFirst.locator('.orig').textContent()) === FIXED);
+  check('聞き手の端末は、直した文の訳を読み上げる', /low-resource/.test(((await spoken(gl))[0] || {}).text || ''));
+  await gh.waitForFunction(t => [...document.querySelectorAll('#list .msg.mine .main')].some(e => e.textContent === t), FIXED);
+  const ghMine = gh.locator('#list .msg.mine').first();
+  check('話した人の画面には、直した文が大きく、聞き取ったままの文が小さく出る', (await ghMine.locator('.heard').textContent()) === '聞き取ったまま：' + HEARD && (await ghMine.locator('.outs li').count()) === 1);
+  check('聞き手の画面には「聞き取ったまま」の文は出ない', (await gl.locator('#list .heard').count()) === 0 && !(await gl.textContent('#list')).includes(HEARD));
+  const gk = await person(gLink);
+  await joinAs(gk, 'ko', '지수');
+  await gk.waitForFunction(() => document.querySelectorAll('#list .msg.other .link').length === 1);
+  await gk.locator('#list .msg.other .link').first().click();
+  await waitMain(gk, '저자원 언어');
+  const gPrompts = gGas.world.calls().filter(x => x.op === 'fetch').map(x => x.prompt);
+  check('あとから入った人の訳も、直した原文から作られる', /MESSAGE:\n"""\n低資源言語を対象にした研究です。\n"""$/.test(gPrompts[gPrompts.length - 1]) && (await gk.locator('#list .msg.other .orig').first().textContent()) === FIXED);
+  await gh.screenshot({ path: path.join(SHOTS, '12-fixed-ja.png') });
+  await gl.screenshot({ path: path.join(SHOTS, '13-fixed-en.png') });
+  for (const pg of [gh, gl, gk]) await pg.context().close();
+  gSite.close(); gGas.server.close();
+
   /* ---------- 履歴を消す ---------- */
   await a.click('#invite-btn');
   await a.click('#clear-btn');

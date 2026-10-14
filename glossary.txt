@@ -1,0 +1,62 @@
+# 用語集 — 多言語通訳ルーム
+#
+# Gemini を使っているときに、スマートフォンの音声入力の聞き取りの誤りを直し、訳語をそろえるために読みます。
+# 書きかえると、10分以内に反映されます（Google 側の公開し直しは要りません）。
+#
+# 書き方：1行に1語。「日本語の用語 = English」。英語のあとに「|」で、ほかの言語の訳を足してもかまいません。
+#   例：低資源言語 = low-resource language | 低資源語言 | 저자원 언어
+# 訳語が分からない語は、用語だけ書いてもかまいません（聞き取りの修正にだけ使われます）。
+# 「#」で始まる行と、空の行は読み飛ばします。
+# 「分野:」の行は、話し手の分野の説明です（1行だけ）。
+
+分野: 記述言語学、少数言語・方言の記録と継承、方言AI（生成AI）
+
+# --- 分野の基本 ---
+記述言語学 = descriptive linguistics
+言語記述 = language description
+言語ドキュメンテーション = language documentation
+社会言語学 = sociolinguistics
+計算言語学 = computational linguistics
+デジタル人文学 = digital humanities
+少数言語 = minority language
+危機言語 = endangered language
+消滅危機言語 = endangered language
+言語復興 = language revitalization
+言語継承 = language transmission
+母語話者 = native speaker
+方言 = dialect
+方言話者 = dialect speaker
+認識的不正義 = epistemic injustice
+マッチドガイズ法 = matched-guise technique
+
+# --- 地域と言語 ---
+日琉諸語 = Japonic languages
+琉球諸語 = Ryukyuan languages
+琉球語 = Ryukyuan
+宮古語 = Miyako
+宮古方言 = Miyako dialect
+鹿児島方言 = Kagoshima dialect
+薩隅方言 = Satsugū dialect
+九州方言 = Kyushu dialects
+
+# --- AI ---
+低資源言語 = low-resource language
+低リソース言語 = low-resource language
+方言AI = dialect AI
+生成AI = generative AI
+大規模言語モデル = large language model (LLM)
+言語モデル = language model
+ファインチューニング = fine-tuning
+学習データ = training data
+音声認識 = speech recognition
+音声合成 = speech synthesis
+対話システム = dialogue system
+コーパス = corpus
+
+# --- 文法・音声 ---
+名詞化 = nominalization
+音韻 = phonology
+音韻論 = phonology
+形態論 = morphology
+統語論 = syntax
+アクセント = pitch accent

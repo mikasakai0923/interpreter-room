@@ -5,7 +5,7 @@
   var I18N = window.IR_I18N, API = window.IR_API, SPEECH = window.IR_SPEECH;
   var LANGS = I18N.LANGS, BY = I18N.BY, T = I18N.T, EX = I18N.EX;
   var CFG = window.IR_CONFIG || {};
-  var VERSION = '0.2.0';
+  var VERSION = '0.3.0';
   var CODE_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';   // gas/Code.gs の IR_CODE_CHARS と同じ
   var STALE_MS = 30000;        // これだけ待っても訳が届かない発言は、失敗として扱う
   var LIVE_MS = 15000;         // ルームが開くのを待っていた人には、これより新しい発言を「いま話されたもの」として読み上げる
@@ -350,9 +350,12 @@
     if (!raw || typeof raw.i !== 'string' || typeof raw.x !== 'string' || !raw.x || !BY[raw.l] || typeof raw.t !== 'number' || typeof raw.s !== 'string') return null;
     return {
       id: raw.i, cid: String(raw.c || ''), sid: raw.s, name: String(raw.n || '').slice(0, 40), lang: raw.l, text: raw.x,
+      fixed: typeof raw.xc === 'string' && raw.xc && raw.xc !== raw.x ? raw.xc.slice(0, MAX_TEXT) : '',   // 聞き取りの誤りを直した原文（Gemini のときだけ）
       ts: raw.t, st: raw.st === 'translating' || raw.st === 'failed' ? raw.st : 'done', tr: raw.tr && typeof raw.tr === 'object' ? raw.tr : {}
     };
   }
+  // 画面に出す原文：聞き取りの誤りを直したものがあれば、そちら
+  function textOf(m) { return m.fixed || m.text; }
   // いまの状態：translating（訳している）／failed（訳せなかった）／done
   function viewState(m) {
     if (m.st !== 'translating') return m.st;
@@ -388,7 +391,8 @@
     el.append(meta, bubble);
 
     if (mine) {
-      bubble.append(para('main', m.text, m.lang));
+      bubble.append(para('main', textOf(m), m.lang));
+      if (m.fixed) bubble.append(para('heard', t('heard') + m.text, m.lang));   // 話した人には、スマートフォンが聞き取ったままの文も見せる
       if (m.local) {
         if (m.st === 'unsent') {
           bubble.append(statusRow(t(m.why === 'busy' ? 'busy' : 'sendFailed'), linkBtn(t('retry'), function () { resend(m); })));
@@ -415,10 +419,10 @@
       return el;
     }
 
-    if (m.lang === S.lang) { bubble.append(para('main', m.text, m.lang)); return el; }
+    if (m.lang === S.lang) { bubble.append(para('main', textOf(m), m.lang)); return el; }
     var tr = trOf(m, S.lang);
     if (tr) {
-      bubble.append(para('main', tr, S.lang), para('orig', m.text, m.lang));
+      bubble.append(para('main', tr, S.lang), para('orig', textOf(m), m.lang));
       if (SPEECH.canSpeak) {
         var say = h('button', 'say');
         say.type = 'button';
@@ -430,7 +434,7 @@
       }
       return el;
     }
-    bubble.append(para('main', m.text, m.lang));
+    bubble.append(para('main', textOf(m), m.lang));
     var state = S.busy[m.id] ? 'translating' : viewState(m);
     if (state === 'translating') bubble.append(statusRow(t('translating')));
     else {
@@ -440,7 +444,7 @@
     return el;
   }
   function sigOf(m) {
-    return [m.st, m.text, m.name, m.lang, JSON.stringify(m.tr || {}), m.why || '', S.busy[m.id] ? 1 : 0, S.failedLocal[m.id] ? 1 : 0, S.lang].join('\u0001');
+    return [m.st, m.text, m.fixed || '', m.name, m.lang, JSON.stringify(m.tr || {}), m.why || '', S.busy[m.id] ? 1 : 0, S.failedLocal[m.id] ? 1 : 0, S.lang].join('\u0001');
   }
   function refresh(id) { delete S.sig[id]; renderList(false); }
 
