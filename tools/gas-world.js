@@ -30,7 +30,13 @@ const CANNED = {
     en: 'Did you have native speakers evaluate the generated sentences?',
     ko: '생성한 문장은 원어민에게 평가를 받았나요?'
   },
-  'ご質問があれば、何でもどうぞ。': { en: 'Please feel free to ask me anything.' }
+  'ご質問があれば、何でもどうぞ。': { en: 'Please feel free to ask me anything.' },
+  '低資源言語を対象にした研究です。': { en: 'This is a study of low-resource languages.', ko: '저자원 언어를 대상으로 한 연구입니다.' }
+};
+// 「まね」の Gemini が直せる聞き取りの誤り：用語集にその語があるときだけ直す（実物は、文脈からも直す）
+const MISHEARD = {
+  '低資源言語': ['定資源元号', '定資源言語', '低資源原語'],
+  '記述言語学': ['既述言語学', '記述元号学']
 };
 
 function sleepSync(ms) {
@@ -141,11 +147,19 @@ function createWorld(opts) {
     }
   };
 
-  // ---------- UrlFetchApp（Gemini のまね） ----------
+  // ---------- UrlFetchApp（Gemini と、用語集の取り寄せのまね） ----------
   const reply = (code, text) => ({ getResponseCode: () => code, getContentText: () => text });
   const UrlFetchApp = {
     fetch(url, o) {
       const c = control();
+      o = o || {};
+      if (String(o.method || 'get').toLowerCase() === 'get') {
+        // 用語集（control.glossary に中身を入れておく。なければ 404）
+        log({ op: 'glossary', url });
+        if (c.mode === 'throw') throw new Error('mock: 接続できません');
+        if (typeof c.glossary !== 'string') return reply(404, 'Not Found');
+        return reply(200, c.glossary);
+      }
       let body = null;
       try { body = JSON.parse(o.payload); } catch (e) { return reply(400, 'mock: payload が JSON ではありません'); }
       const prompt = (((body.contents || [])[0] || {}).parts || [{}])[0].text || '';
@@ -166,8 +180,14 @@ function createWorld(opts) {
       if (c.mode === 'garbage') return reply(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Sorry, I cannot help with that.' }] }, finishReason: 'STOP' }] }));
       const keys = [...prompt.matchAll(/\(key "([^"]+)"\)/g)].map(m => m[1]);
       const msg = (prompt.match(/MESSAGE:\n"""\n([\s\S]*)\n"""$/) || [])[1] || '';
-      const out = {};
-      for (const k of keys) out[k] = (CANNED[msg] && CANNED[msg][k]) || '[' + k + '] ' + msg;
+      // 聞き取りの誤りを直す：用語集の行（「用語 = …」）に載っている語についてだけ
+      let src = msg;
+      for (const term of Object.keys(MISHEARD)) {
+        if (!prompt.includes('\n' + term + ' = ')) continue;
+        for (const bad of MISHEARD[term]) src = src.split(bad).join(term);
+      }
+      const out = { src };
+      for (const k of keys) out[k] = (CANNED[src] && CANNED[src][k]) || '[' + k + '] ' + src;
       let text = JSON.stringify(out);
       if (c.mode === 'fenced') text = 'Here is the translation:\n```json\n' + text + '\n```';
       const parts = c.mode === 'thought' ? [{ text: '{"note":"thinking"}', thought: true }, { text }] : [{ text }];

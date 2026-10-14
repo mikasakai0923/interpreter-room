@@ -20,6 +20,17 @@ const ROOM = 'testroom23';
 const PASS = 'hostpass23';                       // テスト用の合言葉
 const A = 'aaaaaa01', B = 'bbbbbb02', C = 'cccccc03', K = 'kkkkkk04';
 const JA = 'この研究では、記述言語学の知見を使って鹿児島方言の文を生成しています。';
+const GLOSSARY = [
+  '# 用語集のテスト用',
+  '分野: 記述言語学、少数言語・方言',
+  '',
+  '低資源言語 = low-resource language | 低資源語言 | 저자원 언어',
+  '記述言語学 ＝ descriptive linguistics',
+  '琉球諸語',
+  '宮古語 = Miyako'
+].join('\n');
+const HEARD = '定資源元号を対象にした研究です。';           // スマートフォンの音声入力が聞き取った文
+const FIXED = '低資源言語を対象にした研究です。';           // 用語集から直した文
 const EN = 'In this study, we generate Kagoshima dialect sentences using insights from descriptive linguistics.';
 
 // ふだんは、合言葉を入れて、テスト用のルームを開いた状態から始める。
@@ -569,8 +580,124 @@ test('Gemini：キーがあれば、流れを添えて1回で全部の言語に�
   const m = w.state(ROOM).m[1];
   assert.strictEqual(m.tr.en, EN);
   assert.match(m.tr['zh-TW'], /描寫語言學/);
+  assert.strictEqual(m.xc, undefined, '直すところがなければ、直した原文は置かない');
   assert.strictEqual(w.call('setup'), 'ok');
   assert.match(w.logs.join('\n'), /翻訳は動いています（Gemini）/);
+  assert.match(w.logs.join('\n'), /用語集：読みこめませんでした（https:\/\/mikasakai0923\.github\.io\/interpreter-room\/glossary\.txt　理由：http_404）。用語集なしでも、翻訳は動きます。/);
+  assert.match(fetches[0].prompt, /The speakers are researchers at an academic conference\./, '用語集がないときは、分野の説明は一般的なもの');
+});
+
+/* ---------------------------------------------------------------- 用語集と、聞き取りの誤りの修正（Gemini を足したときだけ） */
+
+test('用語集：サイトの glossary.txt を読んで、分野と語を取り出す', () => {
+  const w = world(true);
+  const plain = v => JSON.parse(JSON.stringify(v));             // プログラムの側で作った配列を、ふつうの配列にそろえる
+  const gl = plain(w.call('irGlossaryParse_', GLOSSARY));
+  assert.strictEqual(gl.field, '記述言語学、少数言語・方言');
+  assert.deepStrictEqual(gl.terms, [
+    ['低資源言語', 'low-resource language', '低資源語言', '저자원 언어'],
+    ['記述言語学', 'descriptive linguistics'],
+    ['琉球諸語'],
+    ['宮古語', 'Miyako']
+  ]);
+  assert.deepStrictEqual(plain(w.call('irGlossaryParse_', '')), { field: '', terms: [] });
+  assert.deepStrictEqual(plain(w.call('irGlossaryParse_', '# メモだけ\n\n')), { field: '', terms: [] });
+  const many = Array.from({ length: 400 }, (_, i) => '語' + i + ' = term' + i).join('\n');
+  assert.strictEqual(w.call('irGlossaryParse_', many).terms.length, 300, '語の数には上限がある');
+  const long = 'あ'.repeat(200) + ' = ' + 'b'.repeat(200);
+  const t = w.call('irGlossaryParse_', long).terms[0];
+  assert.ok(t[0].length <= 80 && t[1].length <= 80, '1語の長さにも上限がある');
+});
+
+test('用語集：聞き取りの誤りを直してから訳し、直した原文が聞き手に届く', () => {
+  const w = world(true);
+  w.setProps({ GEMINI_API_KEY: 'TEST_KEY' });
+  w.setControl({ glossary: GLOSSARY });
+  sync(w, A, 'Mika', 'ja'); sync(w, B, 'Alex', 'en');
+  w.clearCalls();
+  const r = say(w, A, 'Mika', 'ja', HEARD);
+  assert.strictEqual(r.st, 'done');
+  const prompt = w.calls().filter(x => x.op === 'fetch')[0].prompt;
+  assert.match(prompt, /field: 記述言語学、少数言語・方言\./, '分野を伝える');
+  assert.match(prompt, /\n低資源言語 = low-resource language \| 低資源語言 \| 저자원 언어\n/, '用語と訳語を伝える');
+  assert.match(prompt, /\n琉球諸語\n/, '訳語のない語も伝える');
+  assert.match(prompt, /Step 1: write the MESSAGE again in Japanese, fixing only words/, '直し方を指示する');
+  assert.match(prompt, /"src": "<the fixed message in Japanese>"/);
+  const m = w.state(ROOM).m[0];
+  assert.strictEqual(m.x, HEARD, '聞き取ったままの文も残す');
+  assert.strictEqual(m.xc, FIXED, '直した原文を置く');
+  assert.strictEqual(m.tr.en, 'This is a study of low-resource languages.', '訳は、直した原文から作る');
+  const got = sync(w, B, 'Alex', 'en');
+  assert.strictEqual(got.m[0].xc, FIXED, '聞き手に、直した原文が届く');
+  assert.strictEqual(count(w, 'glossary'), 1);
+  assert.strictEqual(count(w, 'translate'), 0);
+});
+
+test('用語集：読み直すのは10分に1回。読めないときは、用語集なしで訳す', () => {
+  const w = world(true);
+  w.setProps({ GEMINI_API_KEY: 'TEST_KEY' });
+  w.setControl({ glossary: GLOSSARY });
+  sync(w, A, 'Mika', 'ja'); sync(w, B, 'Alex', 'en');
+  for (let i = 0; i < 5; i++) say(w, A, 'Mika', 'ja', '発言' + i);
+  assert.strictEqual(count(w, 'glossary'), 1, '5回話しても、用語集を読むのは1回');
+  w.advance(11 * 60000);
+  sync(w, B, 'Alex', 'en');                                             // B はまだ部屋にいる
+  say(w, A, 'Mika', 'ja', '次の発言');
+  assert.strictEqual(count(w, 'glossary'), 2, '10分たつと読み直す');
+
+  const w2 = world(true);
+  w2.setProps({ GEMINI_API_KEY: 'TEST_KEY' });                          // 用語集は置かれていない（404）
+  sync(w2, A, 'Mika', 'ja'); sync(w2, B, 'Alex', 'en');
+  for (let i = 0; i < 3; i++) assert.strictEqual(say(w2, A, 'Mika', 'ja', HEARD + i).st, 'done');
+  assert.strictEqual(count(w2, 'glossary'), 1, '読めなかったことも覚えておき、毎回は読みに行かない');
+  assert.strictEqual(w2.state(ROOM).m[0].xc, undefined, '用語集がなければ、直さない');
+  assert.strictEqual(count(w2, 'translate'), 0, 'Gemini での翻訳は続く');
+});
+
+test('用語集：あとから訳を足すときも、直した原文から訳す', () => {
+  const w = world(true);
+  w.setProps({ GEMINI_API_KEY: 'TEST_KEY' });
+  w.setControl({ glossary: GLOSSARY });
+  sync(w, A, 'Mika', 'ja'); sync(w, B, 'Alex', 'en');
+  const id = say(w, A, 'Mika', 'ja', HEARD).id;
+  say(w, A, 'Mika', 'ja', '続きの発言です。');
+  sync(w, K, '지수', 'ko');
+  w.clearCalls();
+  const r = w.post({ a: 'translate', r: ROOM, sid: K, id, lang: 'ko' });
+  assert.strictEqual(r.tr.ko, '저자원 언어를 대상으로 한 연구입니다.');
+  const prompts = w.calls().filter(x => x.op === 'fetch').map(x => x.prompt);
+  assert.strictEqual(prompts.length, 1);
+  assert.match(prompts[0], /MESSAGE:\n"""\n低資源言語を対象にした研究です。\n"""$/, '直した原文を渡す');
+  assert.strictEqual(w.state(ROOM).m[0].xc, FIXED, '直した原文は変わらない');
+  // 流れ（直前の発言）にも、直した原文を使う
+  w.clearCalls();
+  say(w, B, 'Alex', 'en', 'Interesting.');
+  const p2 = w.calls().filter(x => x.op === 'fetch')[0].prompt;
+  assert.match(p2, /\[Japanese\] 低資源言語を対象にした研究です。/);
+  assert.doesNotMatch(p2, /定資源元号/);
+});
+
+test('用語集：setup が、読みこんだ語の数を知らせる', () => {
+  const w = world(true);
+  w.setProps({ GEMINI_API_KEY: 'TEST_KEY' });
+  w.setControl({ glossary: GLOSSARY });
+  assert.strictEqual(w.call('setup'), 'ok');
+  assert.match(w.logs.join('\n'), /用語集：4 語を読みこみました（分野：記述言語学、少数言語・方言）。/);
+  const w2 = world(true);                                               // キーがないときは、用語集のことは言わない
+  assert.strictEqual(w2.call('setup'), 'ok');
+  assert.doesNotMatch(w2.logs.join('\n'), /用語集/);
+  assert.strictEqual(count(w2, 'glossary'), 0);
+});
+
+test('用語集：Google 翻訳にもどったときは、聞き取りの誤りは直らない', () => {
+  const w = world(true);
+  w.setProps({ GEMINI_API_KEY: 'TEST_KEY' });
+  w.setControl({ glossary: GLOSSARY, mode: '500' });
+  sync(w, A, 'Mika', 'ja'); sync(w, B, 'Alex', 'en');
+  assert.strictEqual(say(w, A, 'Mika', 'ja', HEARD).st, 'done');
+  const m = w.state(ROOM).m[0];
+  assert.strictEqual(m.xc, undefined);
+  assert.strictEqual(m.tr.en, '[en] ' + HEARD);
 });
 
 test('Gemini：モデルの名前を変えられる', () => {

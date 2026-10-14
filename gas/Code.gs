@@ -10,6 +10,8 @@
  * 合言葉は、下の関数 setup を実行すると作られて、「実行ログ」に表示されます。
  * QRコードやリンクから参加する人には、合言葉は要りません。
  *
+ * gas/Gemini.gs を足すと、翻訳が Gemini になり、音声入力の聞き取りの誤りを、用語集と話の流れから直してから訳します。
+ *
  * 設定のしかたは docs/setup.md にあります。
  *
  * 発言と訳は、Google 側に最長6時間だけ置かれ、そのあと自動で消えます。
@@ -17,7 +19,7 @@
  * メール・ファイル・連絡先などにふれることはありません。
  */
 
-var IR_VERSION = '0.2.0';
+var IR_VERSION = '0.3.0';
 
 // 使える言語（サイトの js/i18n.js と同じ並び）。左が Google 翻訳の言語コード。
 var IR_LANGS = {
@@ -61,6 +63,7 @@ function setup() {
   var ok = !!(res.tr && res.tr.en);
   if (ok) console.log('翻訳は動いています（' + irEngineName_(res.engine) + '）。「' + IR_SAMPLE + '」→ ' + res.tr.en);
   else console.log('翻訳の試しに失敗しました。理由：' + res.error + (res.detail ? '　くわしい内容：' + res.detail : ''));
+  if (typeof irGlossaryInfo_ === 'function') { var info = irGlossaryInfo_(); if (info) console.log(info); }
   console.log('ルームを作るための合言葉：' + irPassShow_(irPassEnsure_()));
   console.log('（合言葉は、ルームを作る人だけが使います。参加する人には伝えないでください）');
   return ok ? 'ok' : (res.error || 'failed');
@@ -212,8 +215,9 @@ function irIsOpen_(cache, room) { return cache.get('a:' + room) === '1'; }
 /* ============================================================ ルームのデータ（置き場所は CacheService） */
 
 // ルーム1つぶん：{ e: 世代の名前, q: 通し番号, x: 履歴を消した時刻, m: [発言…] }
-// 発言1つ：{ i: 番号, c: 端末がつけた番号, s: 話した端末, n: 表示名, l: 言語, x: 原文, t: 時刻,
-//            st: 状態（translating / done / failed）, tr: {言語: 訳}, v: 最後に変わったときの通し番号 }
+// 発言1つ：{ i: 番号, c: 端末がつけた番号, s: 話した端末, n: 表示名, l: 言語, x: 原文（聞き取ったまま）, t: 時刻,
+//            xc: 聞き取りの誤りを直した原文（直したときだけ）, st: 状態（translating / done / failed）,
+//            tr: {言語: 訳}, v: 最後に変わったときの通し番号 }
 function irLoad_(cache, room) {
   var st = irParse_(cache.get('r:' + room));
   return (st && Array.isArray(st.m)) ? st : null;
@@ -334,7 +338,7 @@ function irTargets_(cache, room, sid, lang, st) {
 
 function irContext_(st, uptoIndex) {
   var from = Math.max(0, uptoIndex - 4);
-  return st.m.slice(from, uptoIndex).map(function (p) { return { l: p.l, x: p.x }; });
+  return st.m.slice(from, uptoIndex).map(function (p) { return { l: p.l, x: p.xc || p.x }; });
 }
 
 function irSay_(req) {
@@ -375,12 +379,12 @@ function irSay_(req) {
 
   // 2. 訳して、発言に書き足す
   var res = irAllow_(cache, 'g', IR_TRANSLATE_PER_MIN) ? irTranslate_(text, lang, targets, made.ctx) : { error: 'busy' };
-  irStore_(cache, room, made.m.i, res.tr || null, res.tr ? 'done' : 'failed');
+  irStore_(cache, room, made.m.i, res.tr || null, res.tr ? 'done' : 'failed', res.src || '');
   return irOk_({ id: made.m.i, st: res.tr ? 'done' : 'failed', why: res.tr ? '' : (res.error || 'upstream') });
 }
 
-// 訳（または失敗のしるし）を、発言に書きこむ
-function irStore_(cache, room, id, tr, state) {
+// 訳（または失敗のしるし）と、聞き取りの誤りを直した原文を、発言に書きこむ
+function irStore_(cache, room, id, tr, state, fixed) {
   return irWithLock_(function () {
     var st = irLoad_(cache, room);
     if (!st) return false;
@@ -388,6 +392,7 @@ function irStore_(cache, room, id, tr, state) {
     if (i < 0) return false;
     st.q++;
     if (tr) { for (var k in tr) { if (irLang_(k) && k !== st.m[i].l) st.m[i].tr[k] = tr[k]; } }
+    if (fixed && !st.m[i].xc && fixed !== st.m[i].x) st.m[i].xc = fixed;   // 直した原文は、最初のものを残す
     if (state) st.m[i].st = state;
     st.m[i].v = st.q;
     irSave_(cache, room, st);
@@ -418,12 +423,12 @@ function irTranslateMore_(req) {
     return irOk_({ tr: m.tr || {} });
   }
   if (!irAllow_(cache, 'g', IR_TRANSLATE_PER_MIN)) return irErr_('busy');
-  var res = irTranslate_(m.x, m.l, targets, irContext_(st, i));
+  var res = irTranslate_(m.xc || m.x, m.l, targets, irContext_(st, i));
   if (!res.tr) {
     if (!keep) irStore_(cache, room, id, null, 'failed');
     return irErr_(res.error || 'upstream', res.detail);
   }
-  irStore_(cache, room, id, res.tr, keep ? '' : 'done');
+  irStore_(cache, room, id, res.tr, keep ? '' : 'done', res.src || '');
   var all = {};
   for (var k in (m.tr || {})) all[k] = m.tr[k];
   for (var k2 in res.tr) all[k2] = res.tr[k2];
@@ -447,7 +452,8 @@ function irClear_(req) {
 
 /* ============================================================ 翻訳 */
 
-// 返すのは { tr: {言語: 訳}, engine: 使ったしくみ } か { error: 理由, detail: くわしい内容 }
+// 返すのは { tr: {言語: 訳}, engine: 使ったしくみ, src: 聞き取りの誤りを直した原文（Gemini のときだけ） }
+// か { error: 理由, detail: くわしい内容 }
 function irTranslate_(text, src, targets, ctx) {
   // gas/Gemini.gs を足してキーを入れてあるときだけ、Gemini で訳す（うまくいかなければ Google 翻訳にもどる）
   if (typeof irGemini_ === 'function') {

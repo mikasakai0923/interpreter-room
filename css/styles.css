@@ -92,6 +92,7 @@ h1, h2, p { margin: 0; }
 .bubble p { overflow-wrap: anywhere; white-space: pre-wrap; }
 .main { font-size: 16px; line-height: 1.5; }
 .orig { padding-top: 6px; border-top: 1px dashed var(--line); font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.heard { font-size: 12.5px; line-height: 1.45; color: var(--accent-ink-2); opacity: .85; }   /* 話した人にだけ見える「聞き取ったまま」の文 */
 .status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: var(--live); }
 .link { border: 0; background: none; padding: 4px 0; font-weight: 700; color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
 .say { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-2); flex: none; }
