@@ -52,7 +52,7 @@ const check = (name, ok, extra) => {
 (async () => {
   const gas = await startServer({ props: { HOST_PASSWORD: PASS } });
   const site = await startStatic(ROOT, 0, { '/config.js': 'window.IR_CONFIG = { apiUrl: ' + JSON.stringify(gas.url) + ', pollScale: 0.2 };' });
-  const bare = await startStatic(ROOT, 0);           // config.js が空のままのサイト
+  const bare = await startStatic(ROOT, 0, { '/config.js': 'window.IR_CONFIG = { apiUrl: "" };' });   // config.js が空のままのサイト
   const base = 'http://127.0.0.1:' + site.address().port + '/';
   const control = q => fetch(gas.url.replace('/exec', '/__control?') + q);
   const stored = (p, k) => p.evaluate(key => window.localStorage.getItem(key), k);
