@@ -4,5 +4,5 @@
 window.IR_CONFIG = {
   // Google 側の中継プログラム（Apps Script のウェブアプリ）のURL。
   // 空（""）のあいだは、最初のページに「設定の確認」と出て、ルームには入れません。
-  apiUrl: ""
+  apiUrl: "https://script.google.com/macros/s/AKfycbxyE6y06ZOYJyybhmNDqAm4AOP0OGm0PcQCI6MtK4PBi93n7vpefgJKi2BKiVt1v7LiLQ/exec"
 };
