@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1E3A8A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ポケット通訳">
+<meta name="robots" content="noindex">
+<title>ポケット通訳</title>
+<style>
+:root{
+  --ash:#E8E7E2; --paper:#FBFAF7; --ink:#1B2230; --mute:#596070; --line:#CFCDC5;
+  --ruri:#1E3A8A; --ruri-deep:#142A66; --kinkan:#F0A20B; --kuri:#A03A1C;
+  --f-ja:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif;
+  --f-zh:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",sans-serif;
+  --f-la:"Avenir Next","Segoe UI",Roboto,system-ui,sans-serif;
+  --dock-h:148px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ash);color:var(--ink);font:16px/1.6 var(--f-ja);-webkit-text-size-adjust:100%;overscroll-behavior-y:none}
+[lang^="zh"]{font-family:var(--f-zh)}
+[lang="en"],[lang="nan-Latn"]{font-family:var(--f-la)}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:3px solid var(--kinkan);outline-offset:2px}
+[hidden]{display:none !important}
+
+.top{position:fixed;inset:0 0 auto 0;z-index:5;background:var(--ruri);color:#fff;display:flex;align-items:center;gap:8px;
+  padding:calc(env(safe-area-inset-top) + 8px) 12px 8px 16px}
+.top h1{font-size:1.0625rem;font-weight:700;margin:0;flex:1;letter-spacing:.04em}
+.top button{background:transparent;border:1.5px solid rgba(255,255,255,.55);color:#fff;border-radius:999px;padding:6px 14px;font-size:.9375rem;min-height:40px}
+.top button:active{background:rgba(255,255,255,.18)}
+
+.log{padding:calc(env(safe-area-inset-top) + 68px) 14px calc(var(--dock-h) + env(safe-area-inset-bottom) + 28px);max-width:720px;margin:0 auto}
+.utt{background:var(--paper);border-left:6px solid var(--ruri);padding:12px 14px 12px 14px;margin:0 0 12px}
+.utt.in{border-left-color:var(--kinkan)}
+.utt.error{border-left-color:var(--kuri)}
+.src{margin:0 0 6px;color:var(--mute);font-size:.9375rem;line-height:1.55;overflow-wrap:anywhere}
+.tag{display:inline-block;font-size:.75rem;font-weight:700;color:var(--ruri-deep);border:1px solid currentColor;border-radius:4px;padding:0 5px;margin-right:7px;line-height:1.5;vertical-align:.12em;font-family:var(--f-ja)}
+.in .src .tag{color:#7A5200}
+.tr{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:9px 0 7px;margin:0;
+  font-size:1.375rem;line-height:1.45;font-weight:600;overflow-wrap:anywhere}
+.tr .tag{font-weight:700;color:var(--mute)}
+.tr .tl{display:block;font-size:1rem;font-weight:500;color:var(--mute);margin-top:2px}
+.tr.saying{color:var(--ruri)}
+.wait{margin:0;color:var(--mute)}
+.wait i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--kinkan);margin-left:5px;animation:blink 1s infinite}
+.wait i:nth-child(2){animation-delay:.2s}.wait i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.wait i{animation:none}}
+.err{margin:0;color:var(--kuri);font-weight:600}
+.err small{display:block;font-weight:400;color:var(--mute);overflow-wrap:anywhere}
+.retry{margin-top:8px;background:#fff;border:1.5px solid var(--kuri);color:var(--kuri);border-radius:999px;padding:6px 16px;min-height:40px}
+
+.empty{padding:8px 4px;color:var(--ink)}
+.empty h2{font-size:1.5rem;line-height:1.35;margin:10px 0 14px;color:var(--ruri-deep)}
+.empty ol{margin:0;padding-left:1.4em}
+.empty li{margin:0 0 8px}
+.empty p{color:var(--mute);font-size:.9375rem}
+
+.dock{position:fixed;inset:auto 0 0 0;z-index:5;background:var(--paper);border-top:1px solid var(--line);
+  padding:8px 14px calc(env(safe-area-inset-bottom) + 10px)}
+.status{margin:0 0 6px;text-align:center;font-size:.9375rem;color:var(--mute);min-height:1.6em}
+.status.rec{color:var(--kuri);font-weight:700}
+.row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;max-width:520px;margin:0 auto}
+.seg{display:inline-flex;border:1.5px solid var(--ruri);border-radius:999px;overflow:hidden;justify-self:start}
+.seg button{background:transparent;border:0;padding:8px 12px;min-height:44px;color:var(--ruri);font-size:.9375rem;font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--ruri);color:#fff}
+.mic{--lv:0;width:84px;height:84px;border-radius:50%;border:0;background:var(--ink);color:#fff;display:grid;place-items:center;
+  box-shadow:0 0 0 calc(var(--lv) * 18px) rgba(240,162,11,.45);transition:background .15s}
+.mic svg{width:36px;height:36px}
+.mic.on{background:var(--ruri)}
+.mic.rec{background:var(--kuri)}
+.side{justify-self:end;display:flex;gap:8px}
+.side button{background:#fff;border:1.5px solid var(--line);border-radius:12px;min-width:52px;min-height:44px;padding:4px 8px;font-size:.8125rem;line-height:1.25;color:var(--ink)}
+.side button[aria-pressed="true"]{border-color:var(--ruri);color:var(--ruri);font-weight:700}
+.typebar{display:flex;gap:8px;max-width:520px;margin:0 auto 8px}
+.typebar input{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;background:#fff}
+.typebar button{background:var(--ruri);color:#fff;border:0;border-radius:10px;padding:0 16px;font-weight:700}
+
+.sheet{position:fixed;inset:0;z-index:20;background:var(--ash);overflow-y:auto;-webkit-overflow-scrolling:touch}
+.sheet header{position:sticky;top:0;background:var(--ruri);color:#fff;display:flex;align-items:center;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px 16px;z-index:1}
+.sheet header h2{flex:1;margin:0;font-size:1.0625rem}
+.sheet header button{background:#fff;color:var(--ruri-deep);border:0;border-radius:999px;padding:7px 18px;font-weight:700;min-height:40px}
+.sheet .body{max-width:640px;margin:0 auto;padding:6px 16px calc(env(safe-area-inset-bottom) + 40px)}
+.sheet h3{font-size:1.0625rem;margin:26px 0 8px;color:var(--ruri-deep);border-bottom:2px solid var(--ruri);padding-bottom:4px}
+.sheet p.note{font-size:.875rem;color:var(--mute);margin:6px 0 10px}
+.f{display:block;margin:12px 0}
+.f>span{display:block;font-weight:600;margin-bottom:4px}
+.f input[type=text],.f input[type=password],.f select,.f textarea{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
+.f textarea{min-height:46vh;font-size:.9375rem;line-height:1.7;font-family:var(--f-ja)}
+.f input[type=range]{width:100%;accent-color:var(--ruri);height:32px}
+.f output{float:right;font-weight:700;color:var(--ruri-deep)}
+.checks{display:flex;flex-wrap:wrap;gap:8px 8px;margin:6px 0 4px}
+.checks label{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1.5px solid var(--line);border-radius:10px;padding:8px 12px;min-height:44px}
+.checks input{width:20px;height:20px;accent-color:var(--ruri)}
+.btn{background:var(--ruri);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:700;min-height:44px}
+.btn.ghost{background:#fff;color:var(--ruri-deep);border:1.5px solid var(--ruri)}
+.btn.warn{background:#fff;color:var(--kuri);border:1.5px solid var(--kuri)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.result{font-size:.9375rem;margin:8px 0;padding:10px 12px;background:#fff;border-left:5px solid var(--ruri);overflow-wrap:anywhere;white-space:pre-wrap}
+.result.bad{border-left-color:var(--kuri)}
+.add{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin:8px 0}
+.add input{min-width:0;border:1.5px solid var(--line);border-radius:10px;padding:10px;background:#fff}
+details{margin:14px 0}
+summary{font-weight:600;color:var(--ruri-deep);padding:8px 0;cursor:pointer}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>ポケット通訳</h1>
+  <button id="openGloss" type="button">用語</button>
+  <button id="openSet" type="button">設定</button>
+</header>
+
+<main class="log" id="log" aria-live="polite">
+  <section class="empty" id="empty">
+    <h2>話すと、その場で通訳します</h2>
+    <ol>
+      <li id="stepKey">「設定」を開いて、Gemini の API キーを入れます。</li>
+      <li>下のマイクを押して話します。</li>
+      <li>日本語は英語・中国語・台湾語に、英語・中国語・台湾語は日本語になります。</li>
+    </ol>
+    <p>訳の文字を押すと、もう一度読み上げます。</p>
+  </section>
+</main>
+
+<footer class="dock">
+  <form class="typebar" id="typebar" hidden>
+    <input id="typed" type="text" autocomplete="off" enterkeyhint="send" aria-label="通訳したい文" placeholder="通訳したい文を入力">
+    <button type="submit">通訳</button>
+  </form>
+  <p class="status" id="status" role="status"></p>
+  <div class="row">
+    <div class="seg" role="group" aria-label="録音のしかた">
+      <button type="button" id="modeAuto" aria-pressed="true">自動</button>
+      <button type="button" id="modeTap" aria-pressed="false">タップ</button>
+    </div>
+    <button class="mic" id="mic" type="button" aria-label="マイク">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
+    </button>
+    <div class="side">
+      <button type="button" id="voiceBtn" aria-pressed="true">声<br><b id="voiceLbl">入</b></button>
+      <button type="button" id="typeBtn" aria-pressed="false">文字<br>入力</button>
+    </div>
+  </div>
+</footer>
+
+<section class="sheet" id="setSheet" hidden aria-label="設定">
+  <header><h2>設定</h2><button type="button" data-close>閉じる</button></header>
+  <div class="body">
+    <h3>Gemini の API キー</h3>
+    <label class="f"><span>API キー</span>
+      <input type="password" data-k="key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza…"></label>
+    <p class="note">キーはこの端末の中にだけ保存されます。録音した声は、通訳のために Google（Gemini API）へ送られます。</p>
+    <div class="btns"><button type="button" class="btn" id="testBtn">接続を確かめる</button></div>
+    <div class="result" id="testOut" hidden></div>
+
+    <h3>録音</h3>
+    <label class="f"><span>無音がこの長さ続いたら区切る <output id="o_silence"></output></span>
+      <input type="range" data-k="silence" min="0.4" max="3" step="0.1"></label>
+    <label class="f"><span>声を拾う感度 <output id="o_sens"></output></span>
+      <input type="range" data-k="sens" min="1" max="10" step="1"></label>
+    <p class="note">まわりがうるさくて区切れないときは感度を下げ、小さい声を拾わないときは上げます。</p>
+    <label class="f"><span>1回の録音の最長 <output id="o_maxLen"></output></span>
+      <input type="range" data-k="maxLen" min="8" max="45" step="1"></label>
+    <p class="note">話が切れなくても、この長さで区切って通訳します（自動のとき）。</p>
+
+    <h3>話す言語</h3>
+    <label class="f"><span>聞き取る言語</span>
+      <select data-k="srcLang">
+        <option value="auto">自動で判別する</option>
+        <option value="ja">日本語に固定</option>
+        <option value="en">英語に固定</option>
+        <option value="zh">中国語に固定</option>
+        <option value="nan">台湾語に固定</option>
+      </select></label>
+    <p class="note">日本語を話したときに出す訳</p>
+    <div class="checks">
+      <label><input type="checkbox" data-k="show.en">英語</label>
+      <label><input type="checkbox" data-k="show.zh">中国語</label>
+      <label><input type="checkbox" data-k="show.nan">台湾語</label>
+    </div>
+
+    <h3>読み上げ</h3>
+    <p class="note">声に出す言語</p>
+    <div class="checks">
+      <label><input type="checkbox" data-k="speak.en">英語</label>
+      <label><input type="checkbox" data-k="speak.zh">中国語</label>
+      <label><input type="checkbox" data-k="speak.ja">日本語</label>
+      <label><input type="checkbox" data-k="speak.nan">台湾語（試験的）</label>
+    </div>
+    <p class="note">台湾語は端末に声がないため、Gemini の音声で読みます。Gemini は台湾語を正式な対応言語にしていないので、発音は確かめてから使ってください。数秒かかります。</p>
+    <label class="f"><span>読み上げの速さ <output id="o_rate"></output></span>
+      <input type="range" data-k="rate" min="0.7" max="1.3" step="0.05"></label>
+    <div class="checks">
+      <label><input type="checkbox" data-k="duplex">読み上げ中も聞き取る（イヤホン用）</label>
+    </div>
+    <p class="note">切っておくと、読み上げの声をマイクが拾って訳し直すのを防ぎます。イヤホンで聞くときは入れると、話しながら訳が流れます。</p>
+
+    <h3>記録</h3>
+    <div class="btns">
+      <button type="button" class="btn ghost" id="copyLog">記録をコピー</button>
+      <button type="button" class="btn warn" id="clearLog">記録を消す</button>
+    </div>
+    <div class="result" id="logOut" hidden></div>
+
+    <details>
+      <summary>くわしい設定（モデル名）</summary>
+      <label class="f"><span>通訳に使うモデル</span><input type="text" data-k="model" autocapitalize="off" spellcheck="false"></label>
+      <label class="f"><span>台湾語の読み上げに使うモデル</span><input type="text" data-k="ttsModel" autocapitalize="off" spellcheck="false"></label>
+      <label class="f"><span>台湾語の読み上げの声</span><input type="text" data-k="ttsVoice" autocapitalize="off" spellcheck="false"></label>
+    </details>
+  </div>
+</section>
+
+<section class="sheet" id="glossSheet" hidden aria-label="用語">
+  <header><h2>用語の登録</h2><button type="button" data-close>閉じる</button></header>
+  <div class="body">
+    <p class="note">聞き取りの誤りを直し、訳語をそろえるために使います。1行に1語、「日本語 = English」。英語のあとに「|」で中国語・台湾語の訳も足せます。用語だけの行は、聞き取りの修正にだけ使います。「#」で始まる行は読み飛ばします。</p>
+    <label class="f"><span>話題の説明（分野）</span><input type="text" id="field" placeholder="例：記述言語学、方言AI"></label>
+    <div class="add">
+      <input type="text" id="addJa" placeholder="日本語の用語" aria-label="日本語の用語">
+      <input type="text" id="addEn" placeholder="訳（English）" aria-label="訳">
+      <button type="button" class="btn" id="addBtn">足す</button>
+    </div>
+    <label class="f"><span>用語の一覧 <output id="glossCount"></output></span>
+      <textarea id="gloss" spellcheck="false" autocapitalize="off"></textarea></label>
+  </div>
+</section>
+
+<script>
+'use strict';
+/* ---------- 保存 ---------- */
+const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+          set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const DEF={key:'',model:'gemini-3.8-flash',ttsModel:'gemini-3.8-flash-tts',ttsVoice:'Kore',mode:'auto',silence:1.0,sens:5,maxLen:20,
+  srcLang:'auto',show:{en:true,zh:true,nan:true},speakOn:true,speak:{ja:true,en:true,zh:true,nan:false},rate:1.0,duplex:false,typing:false};
+const saved=LS.get('pk.settings',{});
+const S=Object.assign({},DEF,saved,{show:Object.assign({},DEF.show,saved.show),speak:Object.assign({},DEF.speak,saved.speak)});
+const saveS=()=>LS.set('pk.settings',S);
+const DEF_FIELD='記述言語学、少数言語・方言の記録と継承、方言AI（生成AI）';
+const DEF_GLOSS=`# --- 分野の基本 ---
+記述言語学 = descriptive linguistics
+言語記述 = language description
+言語ドキュメンテーション = language documentation
+社会言語学 = sociolinguistics
+計算言語学 = computational linguistics
+デジタル人文学 = digital humanities
+少数言語 = minority language
+危機言語 = endangered language
+消滅危機言語 = endangered language
+言語復興 = language revitalization
+言語継承 = language transmission
+母語話者 = native speaker
+方言 = dialect
+方言話者 = dialect speaker
+認識的不正義 = epistemic injustice
+マッチドガイズ法 = matched-guise technique
+
+# --- 地域と言語 ---
+日琉諸語 = Japonic languages
+琉球諸語 = Ryukyuan languages
+琉球語 = Ryukyuan
+宮古語 = Miyako
+宮古方言 = Miyako dialect
+鹿児島方言 = Kagoshima dialect
+薩隅方言 = Satsugū dialect
+九州方言 = Kyushu dialects
+
+# --- AI ---
+低資源言語 = low-resource language | 低資源語言
+低リソース言語 = low-resource language | 低資源語言
+方言AI = dialect AI
+生成AI = generative AI
+大規模言語モデル = large language model (LLM)
+言語モデル = language model
+ファインチューニング = fine-tuning
+学習データ = training data
+音声認識 = speech recognition
+音声合成 = speech synthesis
+対話システム = dialogue system
+コーパス = corpus
+
+# --- 文法・音声 ---
+名詞化 = nominalization
+音韻 = phonology
+音韻論 = phonology
+形態論 = morphology
+統語論 = syntax
+アクセント = pitch accent
+`;
+const G={field:LS.get('pk.field',DEF_FIELD),text:LS.get('pk.gloss',DEF_GLOSS)};
+function glossLines(){return G.text.split(/\r?\n/).map(s=>s.trim()).filter(s=>s&&!s.startsWith('#')&&!/^分野\s*[:：]/.test(s)).slice(0,400)}
+
+/* ---------- 画面の部品 ---------- */
+const $=id=>document.getElementById(id);
+const logEl=$('log'),emptyEl=$('empty'),statusEl=$('status'),micBtn=$('mic');
+const LANG={ja:{name:'日本語',attr:'ja',bcp:'ja-JP'},en:{name:'English',attr:'en',bcp:'en-US'},
+  zh:{name:'中文',attr:'zh-Hant-TW',bcp:'zh-TW'},nan:{name:'台語',attr:'zh-Hant-TW',bcp:''},other:{name:'ほかの言語',attr:'',bcp:''}};
+let entries=LS.get('pk.log',[]).filter(e=>e&&e.status==='done');
+let nextId=entries.reduce((m,e)=>Math.max(m,e.id),0)+1;
+const saveLog=()=>LS.set('pk.log',entries.filter(e=>e.status==='done').slice(-100).map(e=>({id:e.id,t:e.t,status:e.status,lang:e.lang,text:e.text,out:e.out})));
+
+function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n}
+function render(e){
+  let box=$('u'+e.id);
+  if(e.status==='none'){if(box)box.remove();refreshEmpty();return}
+  const fresh=!box;
+  if(!box){box=el('article');box.id='u'+e.id;logEl.appendChild(box)}
+  box.className='utt '+e.status+(e.lang&&e.lang!=='ja'?' in':'');
+  box.replaceChildren();
+  if(e.status==='pending'){
+    const p=el('p','wait',e.typed?'「'+e.typed+'」を通訳中':'通訳中');p.append(el('i'),el('i'),el('i'));box.append(p);
+  }else if(e.status==='error'){
+    const p=el('p','err',e.err||'通訳できませんでした。');if(e.detail)p.append(el('small','',e.detail));box.append(p);
+    if(e._in){const b=el('button','retry','もう一度送る');b.type='button';b.onclick=()=>run(e);box.append(b)}
+  }else{
+    const L=LANG[e.lang]||LANG.other;
+    const s=el('p','src');if(L.attr)s.lang=L.attr;s.append(el('span','tag',L.name),document.createTextNode(e.text));box.append(s);
+    for(const l of ['ja','en','zh','nan']){
+      const t=e.out&&e.out[l];if(!t)continue;
+      const b=el('button','tr');b.type='button';b.lang=LANG[l].attr;
+      b.append(el('span','tag',LANG[l].name),document.createTextNode(t));
+      if(l==='nan'&&e.out.tl){const tl=el('span','tl',e.out.tl);tl.lang='nan-Latn';b.append(tl)}
+      b.setAttribute('aria-label',LANG[l].name+'：'+t+'（押すと読み上げ）');
+      b.onclick=()=>{stopSpeaking();enqueue(l,t,b)};
+      box.append(b);
+    }
+  }
+  refreshEmpty();
+  if(fresh||e.status!=='pending')window.scrollTo({top:document.documentElement.scrollHeight});
+}
+function refreshEmpty(){emptyEl.hidden=logEl.querySelector('.utt')!=null;$('stepKey').hidden=!!S.key}
+
+/* ---------- Gemini ---------- */
+const API='https://generativelanguage.googleapis.com/v1beta/models/';
+const SYS=`You are the engine of a pocket interpreter used at an academic conference. Each request carries ONE short audio clip (or one typed sentence) from a live conversation or talk.
+
+Steps:
+1. Decide which language is actually spoken: "ja" Japanese, "en" English, "zh" Mandarin Chinese, "nan" Taiwanese Hokkien (Tâi-gí, 台語), or "other".
+2. Transcribe what was said, in that language's normal writing: Mandarin in Traditional characters, Taiwanese Hokkien in 臺灣漢字. Drop fillers and false starts. Use the glossary and the previous lines to repair mis-heard technical terms. Never add words that were not spoken.
+3. Translate as a professional interpreter: complete, natural, same register, nothing added, no notes. If the speaker asks a question, translate the question. Never answer it.
+   - Spoken language "ja": translate into the requested targets. "en" = English. "zh" = Traditional Chinese as used in Taiwan. "nan" = Taiwanese Hokkien written in 臺灣漢字 (Ministry of Education recommended characters), and put its Tâi-lô romanization in "nan_tl".
+   - Any other spoken language: translate into Japanese ("ja") only.
+4. If the clip has no intelligible speech (silence, noise, music, far-away chatter), return lang "none" and leave every other field "".
+
+Use glossary renderings exactly when a glossary term occurs. Glossary lines read "Japanese term = English | other renderings"; a line with only a term is a spelling hint.
+
+Reply with JSON only, no code fence:
+{"lang":"ja|en|zh|nan|other|none","text":"transcript","ja":"","en":"","zh":"","nan":"","nan_tl":""}
+Fields that are not needed stay "".`;
+const CFGS=[{responseMimeType:'application/json',thinkingConfig:{thinkingLevel:'low'}},{responseMimeType:'application/json'},null];
+let cfgIdx=0,modelAlt='';
+const SPARE=['gemini-3.6-flash','gemini-3.5-flash-lite'];
+
+class ApiError extends Error{constructor(msg,detail){super(msg);this.detail=detail||''}}
+function explain(status,body){
+  let m='';try{m=JSON.parse(body).error.message||''}catch(e){m=String(body||'').slice(0,300)}
+  if(/API key/i.test(m)||status===401)return new ApiError('API キーが正しくないようです。設定で確かめてください。',m);
+  if(status===403)return new ApiError('このキーでは使えません（権限がありません）。',m);
+  if(status===404)return new ApiError('モデル名が見つかりません。設定の「くわしい設定」を確かめてください。',m);
+  if(status===429)return new ApiError('回数の上限に達しました。少し待ってから、もう一度送ってください。',m);
+  if(status>=500)return new ApiError('Google 側が混み合っています。もう一度送ってください。',m);
+  return new ApiError('通訳できませんでした（'+status+'）。',m);
+}
+async function post(model,body,ms){
+  const ac=new AbortController();const timer=setTimeout(()=>ac.abort(),ms||30000);
+  try{
+    const r=await fetch(API+encodeURIComponent(model)+':generateContent',{method:'POST',signal:ac.signal,
+      headers:{'Content-Type':'application/json','x-goog-api-key':S.key},body:JSON.stringify(body)});
+    return {ok:r.ok,status:r.status,text:await r.text()};
+  }catch(e){
+    throw new ApiError(e.name==='AbortError'?'返事が来ませんでした。電波を確かめて、もう一度送ってください。':'通信できませんでした。電波を確かめてください。',String(e.message||e));
+  }finally{clearTimeout(timer)}
+}
+function buildParts(input){
+  const targets=['en','zh','nan'].filter(l=>S.show[l]);
+  const ctx=entries.filter(e=>e.status==='done').slice(-4).map(e=>e.lang+': '+e.text).join('\n');
+  const g=glossLines();
+  let t='Targets when Japanese is spoken: '+(targets.join(', ')||'en')+'.\n';
+  t+=S.srcLang==='auto'?'Detect the spoken language.\n':'The speaker\'s language is fixed to "'+S.srcLang+'". Do not detect; transcribe as that language.\n';
+  if(G.field.trim())t+='Topic of the conversation: '+G.field.trim()+'\n';
+  if(g.length)t+='Glossary:\n'+g.join('\n')+'\n';
+  if(ctx)t+='Previous lines, oldest first (context only, do not translate again):\n'+ctx+'\n';
+  if(input.b64)return [{inline_data:{mime_type:'audio/wav',data:input.b64}},{text:t+'Interpret the attached audio clip.'}];
+  return [{text:t+'Interpret this typed sentence:\n'+input.text}];
+}
+function parseReply(raw){
+  let j;try{j=JSON.parse(raw)}catch(e){throw new ApiError('Google からの返事を読み取れませんでした。',raw.slice(0,200))}
+  const parts=(((j.candidates||[])[0]||{}).content||{}).parts||[];
+  let txt=parts.filter(p=>p&&typeof p.text==='string'&&!p.thought).map(p=>p.text).join('').trim();
+  if(!txt){const why=((j.candidates||[])[0]||{}).finishReason||(j.promptFeedback&&j.promptFeedback.blockReason)||'';
+    throw new ApiError('訳が返ってきませんでした。もう一度送ってください。',why)}
+  txt=txt.replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'');
+  const a=txt.indexOf('{'),b=txt.lastIndexOf('}');
+  let o;try{o=JSON.parse(a>=0&&b>a?txt.slice(a,b+1):txt)}catch(e){throw new ApiError('訳の形が崩れていました。もう一度送ってください。',txt.slice(0,200))}
+  const s=k=>typeof o[k]==='string'?o[k].trim():'';
+  let lang=s('lang').toLowerCase();if(!['ja','en','zh','nan','other','none'].includes(lang))lang='other';
+  return {lang,text:s('text'),out:{ja:s('ja'),en:s('en'),zh:s('zh'),nan:s('nan'),tl:s('nan_tl')}};
+}
+async function translate(input){
+  if(!S.key)throw new ApiError('設定で API キーを入れてください。');
+  const parts=buildParts(input);
+  for(;;){
+    const body={system_instruction:{parts:[{text:SYS}]},contents:[{role:'user',parts}]};
+    if(CFGS[cfgIdx])body.generationConfig=CFGS[cfgIdx];
+    const r=await post(modelAlt||S.model,body,35000);
+    if(r.ok)return parseReply(r.text);
+    if(r.status===400&&cfgIdx<CFGS.length-1&&!/API key/i.test(r.text)){cfgIdx++;continue}
+    if(r.status===404){                                 // モデル名が使えないときは、予備のモデルで試す
+      const next=SPARE[SPARE.indexOf(modelAlt)+1];
+      if(next){modelAlt=next;if(next===S.model)continue;note('モデル '+S.model+' が使えないため、'+next+' で通訳します。');continue}
+    }
+    throw explain(r.status,r.text);
+  }
+}
+
+/* ---------- 1発言の流れ ---------- */
+let pending=0,nextSpeak=0;const order=[];
+function submit(input){
+  const e={id:nextId++,t:Date.now(),status:'pending',_in:input,typed:input.text||''};
+  entries.push(e);order.push(e);run(e);
+}
+async function run(e){
+  e.status='pending';e.err='';e.detail='';render(e);pending++;setStatus();
+  try{
+    const r=await translate(e._in);
+    if(r.lang==='none'||!r.text){e.status='none'}
+    else{
+      e.lang=r.lang;e.text=r.text;e.out=r.out;
+      if(e.lang==='ja'){for(const l of ['en','zh','nan'])if(!S.show[l])e.out[l]='';e.out.ja=''}
+      else{e.out.en=e.out.zh=e.out.nan=e.out.tl=''}
+      e.status='done';delete e._in;
+    }
+  }catch(err){e.status='error';e.err=err.message||'通訳できませんでした。';e.detail=err.detail||''}
+  pending--;render(e);
+  if(e.status==='none')entries=entries.filter(x=>x!==e);
+  saveLog();
+  if(order.indexOf(e)<nextSpeak)speakEntry(e);else flushSpeech();   // 送り直した発言は、その場で読む
+  setStatus();
+}
+function speakEntry(e){
+  if(e.status!=='done'||e.spoken||!S.speakOn)return;
+  e.spoken=true;
+  const box=$('u'+e.id);
+  const btn=l=>box?[...box.querySelectorAll('.tr')].find(b=>b.firstChild.textContent===LANG[l].name):null;
+  if(e.lang==='ja'){for(const l of ['en','zh','nan'])if(S.speak[l]&&e.out[l])enqueue(l,e.out[l],btn(l))}
+  else if(S.speak.ja&&e.out.ja)enqueue('ja',e.out.ja,btn('ja'));
+}
+function flushSpeech(){
+  while(nextSpeak<order.length&&order[nextSpeak].status!=='pending')speakEntry(order[nextSpeak++]);
+}
+
+/* ---------- 読み上げ ---------- */
+const Q=[];let speaking=false,gateUntil=0,curStop=null,ttsShape=0,ttsUnlocked=false;
+const synth=window.speechSynthesis||null;
+function enqueue(lang,text,node){Q.push({lang,text,node});pump()}
+function pump(){
+  if(speaking||!Q.length)return;
+  if(!S.duplex&&V.state==='rec')return;            // 話の切れ目まで待つ
+  const it=Q.shift();speaking=true;if(it.node)it.node.classList.add('saying');setStatus();
+  let finished=false;
+  const done=()=>{if(finished)return;finished=true;curStop=null;if(it.node)it.node.classList.remove('saying');
+    speaking=false;gateUntil=performance.now()+350;setStatus();pump()};
+  (it.lang==='nan'?speakGemini(it.text):speakDevice(it.lang,it.text)).then(done,done);
+}
+function stopSpeaking(){Q.length=0;if(curStop){try{curStop()}catch(e){}}if(synth){try{synth.cancel()}catch(e){}}}
+function pickVoice(lang){
+  if(!synth)return null;const vs=synth.getVoices()||[];const norm=v=>String(v.lang||'').replace('_','-').toLowerCase();
+  const want=lang==='zh'?['zh-tw','cmn-hant-tw','zh-hant','zh-hk','zh','cmn']:lang==='en'?['en-us','en-gb','en']:['ja-jp','ja'];
+  for(const w of want){const v=vs.find(x=>norm(x).startsWith(w));if(v)return v}
+  return null;
+}
+function speakDevice(lang,text){
+  return new Promise(res=>{
+    if(!synth||!window.SpeechSynthesisUtterance)return res();
+    const u=new SpeechSynthesisUtterance(text);const v=pickVoice(lang);
+    if(v){u.voice=v;u.lang=v.lang.replace('_','-')}else u.lang=LANG[lang].bcp;
+    u.rate=S.rate;window.__u=u;                       // 参照を残す（途中で消されないように）
+    let started=Date.now();const limit=4000+text.length*450;
+    const tick=setInterval(()=>{const idle=!synth.speaking&&!synth.pending;
+      if((idle&&Date.now()-started>700)||Date.now()-started>limit)fin()},250);
+    const fin=()=>{clearInterval(tick);res()};
+    u.onend=fin;u.onerror=fin;curStop=()=>{clearInterval(tick);res()};
+    try{synth.speak(u)}catch(e){fin()}
+  });
+}
+function unlockTts(){
+  if(ttsUnlocked||!synth||!window.SpeechSynthesisUtterance)return;ttsUnlocked=true;
+  try{const u=new SpeechSynthesisUtterance(' ');u.volume=0;synth.speak(u)}catch(e){}
+}
+function b64ToBytes(b64){const s=atob(b64);const u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u}
+async function speakGemini(text){
+  if(!S.key)return;
+  const style='Read this aloud in Taiwanese Hokkien (Tâi-gí, 台語) pronunciation, not Mandarin. Calm, clear interpreter voice.';
+  const shapes=[
+    {contents:[{role:'user',parts:[{text,speech_metadata:{style}}]}],generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:S.ttsVoice||'Kore'}}}},
+    {contents:[{role:'user',parts:[{text:style+'\n\n'+text}]}],generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:S.ttsVoice||'Kore'}}}}}];
+  let r;
+  for(;;){r=await post(S.ttsModel,shapes[ttsShape],30000);if(!r.ok&&r.status===400&&ttsShape<shapes.length-1&&!/API key/i.test(r.text)){ttsShape++;continue}break}
+  if(!r.ok){const er=explain(r.status,r.text);note('台湾語の読み上げができませんでした。'+er.message);return}
+  let part=null;try{const ps=JSON.parse(r.text).candidates[0].content.parts;part=ps.map(p=>p.inlineData||p.inline_data).find(Boolean)}catch(e){}
+  if(!part||!part.data){note('台湾語の音声が返ってきませんでした。');return}
+  const bytes=b64ToBytes(part.data);const ctx=audioCtx();await ctx.resume();
+  let buf;
+  try{buf=await ctx.decodeAudioData(bytes.buffer.slice(0))}
+  catch(e){                                             // ヘッダーのない PCM（24kHz・16bit）として読む
+    const m=/rate=(\d+)/.exec(part.mimeType||part.mime_type||'');const rate=m?+m[1]:24000;
+    const n=bytes.length>>1,dv=new DataView(bytes.buffer);buf=ctx.createBuffer(1,n,rate);const ch=buf.getChannelData(0);
+    for(let i=0;i<n;i++)ch[i]=dv.getInt16(i*2,true)/32768;
+  }
+  await new Promise(res=>{const src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.onended=res;
+    curStop=()=>{try{src.stop()}catch(e){}res()};src.start()});
+}
+
+/* ---------- マイクと無音の判定 ---------- */
+const RATE=16000;
+const WORKLET=`class Cap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(2048);this.n=0}
+process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];if(this.n===2048){this.port.postMessage(this.b.slice(0));this.n=0}}}return true}}
+registerProcessor('cap',Cap);`;
+const A={ctx:null,stream:null,src:null,node:null,mute:null,on:false,wl:false,down:null,busy:false};
+function audioCtx(){if(!A.ctx){const C=window.AudioContext||window.webkitAudioContext;A.ctx=new C()}return A.ctx}
+function makeDownsampler(inRate,outRate){
+  const step=inRate/outRate;let acc=0,n=0,pos=0;
+  return function(input){
+    const out=new Float32Array(Math.ceil(input.length/step)+1);let o=0;
+    for(let i=0;i<input.length;i++){acc+=input[i];n++;pos+=1;if(pos>=step){out[o++]=acc/n;acc=0;n=0;pos-=step}}
+    return out.subarray(0,o);
+  };
+}
+async function micOn(){
+  if(A.on)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('このブラウザではマイクが使えません。Safari か Chrome で開いてください。');
+  const ctx=audioCtx();ctx.resume().catch(()=>{});
+  A.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+  await ctx.resume();
+  A.down=makeDownsampler(ctx.sampleRate,RATE);
+  A.src=ctx.createMediaStreamSource(A.stream);
+  A.mute=ctx.createGain();A.mute.gain.value=0;A.mute.connect(ctx.destination);
+  let node=null;
+  if(ctx.audioWorklet&&window.AudioWorkletNode){
+    try{
+      if(!A.wl){const url=URL.createObjectURL(new Blob([WORKLET],{type:'application/javascript'}));await ctx.audioWorklet.addModule(url);A.wl=true}
+      node=new AudioWorkletNode(ctx,'cap');node.port.onmessage=ev=>onAudio(ev.data);
+    }catch(e){node=null}
+  }
+  if(!node){node=ctx.createScriptProcessor(2048,1,1);node.onaudioprocess=ev=>onAudio(new Float32Array(ev.inputBuffer.getChannelData(0)))}
+  A.src.connect(node);node.connect(A.mute);A.node=node;A.on=true;
+  A.stream.getAudioTracks().forEach(t=>t.onended=()=>{if(A.on){micOff();listening=false;setStatus('マイクが切れました。もう一度マイクを押してください。')}});
+}
+function micOff(){
+  if(!A.on)return;A.on=false;
+  try{A.src.disconnect();A.node.disconnect();A.mute.disconnect();if(A.node.port)A.node.port.onmessage=null;else A.node.onaudioprocess=null}catch(e){}
+  try{A.stream.getTracks().forEach(t=>{t.onended=null;t.stop()})}catch(e){}
+  A.stream=A.src=A.node=A.mute=null;level=0;
+}
+const V={state:'idle',pre:[],seg:[],dur:0,voiced:0,run:0,silent:0,nf:0.004};
+let level=0;
+function rms(c){let s=0;for(let i=0;i<c.length;i++)s+=c[i]*c[i];return Math.sqrt(s/(c.length||1))}
+function threshold(){const absMin=0.03*Math.pow(0.72,S.sens-1);const k=4.5-S.sens*0.25;return Math.max(absMin,V.nf*k)}
+function vadReset(){V.state='idle';V.pre=[];V.seg=[];V.dur=0;V.voiced=0;V.run=0;V.silent=0}
+function onAudio(raw){
+  if(!A.on)return;
+  const c=A.down(raw);if(!c.length)return;
+  const r=rms(c),dur=c.length/RATE;
+  level=Math.max(Math.min(1,r*9),level*0.8);
+  if(S.mode==='tap'){
+    if(V.state==='rec'){V.seg.push(c);V.dur+=dur;if(V.dur>=60)tapStop()}
+    return;
+  }
+  if(!S.duplex&&(speaking||performance.now()<gateUntil)){if(V.state!=='idle'||V.pre.length)vadReset();return}
+  const voiced=r>threshold();
+  if(V.state==='idle'){
+    if(!voiced)V.nf=r<V.nf?V.nf*0.7+r*0.3:V.nf*0.98+r*0.02;
+    V.pre.push(c);if(V.pre.length>8)V.pre.shift();
+    V.run=voiced?V.run+1:0;
+    if(V.run>=3){V.state='rec';V.seg=V.pre;V.pre=[];V.dur=V.seg.reduce((a,x)=>a+x.length,0)/RATE;V.voiced=V.run*dur;V.silent=0;V.run=0;setStatus()}
+  }else{
+    V.seg.push(c);V.dur+=dur;V.nf=V.nf*0.998+r*0.002;
+    if(voiced){V.voiced+=dur;V.silent=0}else V.silent+=dur;
+    if(V.silent>=S.silence)cut(true);else if(V.dur>=S.maxLen)cut(false);
+  }
+}
+function concat(chunks){let n=0;for(const c of chunks)n+=c.length;const out=new Float32Array(n);let o=0;for(const c of chunks){out.set(c,o);o+=c.length}return out}
+function cut(trim){
+  let pcm=concat(V.seg);const voiced=V.voiced,silent=V.silent;
+  vadReset();
+  if(trim){const drop=Math.max(0,Math.floor((silent-0.25)*RATE));if(drop<pcm.length)pcm=pcm.subarray(0,pcm.length-drop)}
+  if(voiced>=0.35)submit({b64:wavBase64(pcm)});
+  setStatus();pump();
+}
+function wavBase64(pcm){
+  const buf=new ArrayBuffer(44+pcm.length*2),dv=new DataView(buf);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i))};
+  w(0,'RIFF');dv.setUint32(4,36+pcm.length*2,true);w(8,'WAVE');w(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);
+  dv.setUint32(24,RATE,true);dv.setUint32(28,RATE*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);w(36,'data');dv.setUint32(40,pcm.length*2,true);
+  for(let i=0;i<pcm.length;i++){const s=Math.max(-1,Math.min(1,pcm[i]));dv.setInt16(44+i*2,s<0?s*0x8000:s*0x7FFF,true)}
+  const u=new Uint8Array(buf);let bin='';for(let i=0;i<u.length;i+=0x8000)bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));
+  return btoa(bin);
+}
+
+/* ---------- マイクのボタン ---------- */
+let listening=false,wake=null,noteMsg='',noteTimer=0;
+function note(m){noteMsg=m;clearTimeout(noteTimer);noteTimer=setTimeout(()=>{noteMsg='';setStatus()},6000);setStatus()}
+function setStatus(msg){
+  if(msg){note(msg);return}
+  const rec=V.state==='rec';
+  micBtn.classList.toggle('on',listening||A.on);micBtn.classList.toggle('rec',rec);
+  statusEl.classList.toggle('rec',rec&&!noteMsg);
+  let t;
+  if(noteMsg)t=noteMsg;
+  else if(!S.key)t='「設定」で API キーを入れると使えます';
+  else if(rec)t=S.mode==='tap'?'録音中　もう一度押すと通訳します':'録音中';
+  else if(speaking)t='読み上げ中';
+  else if(listening)t='聞いています　話すと自動で区切ります';
+  else if(pending)t='通訳中';
+  else t=S.mode==='tap'?'マイクを押して話し、もう一度押すと通訳します':'マイクを押すと、聞き取りを始めます';
+  statusEl.textContent=t;
+  micBtn.setAttribute('aria-label',rec&&S.mode==='tap'?'録音を止めて通訳する':listening?'聞き取りを止める':'マイクを入れる');
+}
+async function keepAwake(on){
+  try{if(on&&navigator.wakeLock&&!wake){wake=await navigator.wakeLock.request('screen');wake.addEventListener('release',()=>{wake=null})}
+      else if(!on&&wake){await wake.release();wake=null}}catch(e){wake=null}
+}
+function micError(e){
+  const n=e&&e.name;
+  setStatus(n==='NotAllowedError'||n==='SecurityError'?'マイクが許可されていません。ブラウザの設定でこのページのマイクを許可してください。':
+            n==='NotFoundError'?'マイクが見つかりません。':(e&&e.message)||'マイクを使えませんでした。');
+}
+async function tapStop(){
+  const pcm=concat(V.seg),dur=V.dur;vadReset();micOff();keepAwake(false);
+  if(dur>=0.3)submit({b64:wavBase64(pcm)});else note('短すぎて通訳できませんでした。');
+  setStatus();pump();
+}
+micBtn.addEventListener('click',async()=>{
+  if(A.busy)return;
+  if(!S.key){openSheet('setSheet');return}
+  unlockTts();
+  A.busy=true;
+  try{
+    if(S.mode==='tap'){
+      if(V.state==='rec'){await tapStop()}
+      else{stopSpeaking();setStatus('マイクを準備中');await micOn();noteMsg='';vadReset();V.state='rec';keepAwake(true);setStatus()}
+    }else{
+      if(listening){listening=false;if(V.state==='rec'&&V.voiced>=0.35)cut(true);vadReset();micOff();keepAwake(false);setStatus()}
+      else{setStatus('マイクを準備中');await micOn();noteMsg='';vadReset();listening=true;keepAwake(true);setStatus()}
+    }
+  }catch(e){listening=false;vadReset();micOff();micError(e)}
+  A.busy=false;
+});
+function setMode(m){
+  if(S.mode===m)return;
+  listening=false;vadReset();micOff();keepAwake(false);
+  S.mode=m;saveS();$('modeAuto').setAttribute('aria-pressed',m==='auto');$('modeTap').setAttribute('aria-pressed',m==='tap');setStatus();
+}
+$('modeAuto').onclick=()=>setMode('auto');$('modeTap').onclick=()=>setMode('tap');
+$('voiceBtn').onclick=()=>{S.speakOn=!S.speakOn;saveS();if(!S.speakOn)stopSpeaking();else unlockTts();paintToggles()};
+$('typeBtn').onclick=()=>{S.typing=!S.typing;saveS();paintToggles();if(S.typing)$('typed').focus()};
+function paintToggles(){
+  $('voiceBtn').setAttribute('aria-pressed',S.speakOn);$('voiceLbl').textContent=S.speakOn?'入':'切';
+  $('typeBtn').setAttribute('aria-pressed',S.typing);$('typebar').hidden=!S.typing;
+  document.documentElement.style.setProperty('--dock-h',S.typing?'204px':'148px');
+}
+$('typebar').addEventListener('submit',ev=>{
+  ev.preventDefault();const v=$('typed').value.trim();if(!v)return;
+  if(!S.key){openSheet('setSheet');return}
+  unlockTts();$('typed').value='';submit({text:v});
+});
+(function meter(){micBtn.style.setProperty('--lv',A.on?level.toFixed(3):'0');requestAnimationFrame(meter)})();
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible')return;
+  if(A.on){if(A.ctx&&A.ctx.state!=='running')A.ctx.resume().catch(()=>{});keepAwake(true)}
+});
+
+/* ---------- 設定と用語の画面 ---------- */
+function openSheet(id){$(id).hidden=false;document.body.style.overflow='hidden'}
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{b.closest('.sheet').hidden=true;document.body.style.overflow='';refreshEmpty();setStatus()});
+$('openSet').onclick=()=>openSheet('setSheet');$('openGloss').onclick=()=>openSheet('glossSheet');
+const getP=(o,p)=>p.split('.').reduce((a,k)=>a==null?a:a[k],o);
+function setP(o,p,v){const ks=p.split('.');const last=ks.pop();ks.reduce((a,k)=>a[k],o)[last]=v}
+const UNIT={silence:v=>v.toFixed(1)+' 秒',sens:v=>String(v),maxLen:v=>v+' 秒',rate:v=>'×'+v.toFixed(2)};
+function paintOut(k){const o=$('o_'+k);if(o)o.textContent=UNIT[k](getP(S,k))}
+document.querySelectorAll('[data-k]').forEach(inp=>{
+  const k=inp.dataset.k,v=getP(S,k);
+  if(inp.type==='checkbox')inp.checked=!!v;else inp.value=v;
+  paintOut(k);
+  inp.addEventListener(inp.type==='checkbox'||inp.tagName==='SELECT'?'change':'input',()=>{
+    const nv=inp.type==='checkbox'?inp.checked:inp.type==='range'?parseFloat(inp.value):inp.value.trim();
+    setP(S,k,nv);saveS();paintOut(k);
+    if(k==='model'){cfgIdx=0;modelAlt=''}if(k==='ttsModel')ttsShape=0;if(k==='speak.nan'&&nv)unlockTts();
+  });
+});
+$('testBtn').onclick=async()=>{
+  const out=$('testOut');out.hidden=false;out.className='result';out.textContent='確かめています…';
+  try{
+    const r=await translate({text:'こんにちは。低資源言語の研究をしています。'});
+    out.textContent='つながりました。\n'+['en','zh','nan'].map(l=>r.out[l]?LANG[l].name+'：'+r.out[l]:'').filter(Boolean).join('\n');
+  }catch(e){out.className='result bad';out.textContent=(e.message||'つながりませんでした。')+(e.detail?'\n'+e.detail:'')}
+};
+$('copyLog').onclick=async()=>{
+  const txt=entries.filter(e=>e.status==='done').map(e=>{
+    const d=new Date(e.t),p=n=>String(n).padStart(2,'0');
+    const lines=['['+p(d.getHours())+':'+p(d.getMinutes())+'] '+(LANG[e.lang]||LANG.other).name+'：'+e.text];
+    for(const l of ['ja','en','zh','nan'])if(e.out[l])lines.push('  '+LANG[l].name+'：'+e.out[l]+(l==='nan'&&e.out.tl?'（'+e.out.tl+'）':''));
+    return lines.join('\n')}).join('\n\n');
+  const out=$('logOut');out.hidden=false;out.className='result';
+  if(!txt){out.textContent='記録はまだありません。';return}
+  try{await navigator.clipboard.writeText(txt);out.textContent='記録をコピーしました。'}
+  catch(e){out.textContent=txt}
+};
+$('clearLog').onclick=()=>{
+  if(!confirm('この端末に残っている通訳の記録を、すべて消します。'))return;
+  stopSpeaking();entries=entries.filter(e=>e.status==='pending');logEl.querySelectorAll('.utt:not(.pending)').forEach(n=>n.remove());
+  saveLog();refreshEmpty();const out=$('logOut');out.hidden=false;out.className='result';out.textContent='記録を消しました。';
+};
+const glossEl=$('gloss'),fieldEl=$('field');
+function paintGloss(){$('glossCount').textContent=glossLines().length+' 語'}
+glossEl.value=G.text;fieldEl.value=G.field;paintGloss();
+glossEl.addEventListener('input',()=>{G.text=glossEl.value;LS.set('pk.gloss',G.text);paintGloss()});
+fieldEl.addEventListener('input',()=>{G.field=fieldEl.value;LS.set('pk.field',G.field)});
+$('addBtn').onclick=()=>{
+  const ja=$('addJa').value.trim(),en=$('addEn').value.trim();if(!ja)return;
+  G.text=G.text.replace(/\s*$/,'\n')+ja+(en?' = '+en:'')+'\n';glossEl.value=G.text;LS.set('pk.gloss',G.text);paintGloss();
+  $('addJa').value='';$('addEn').value='';$('addJa').focus();glossEl.scrollTop=glossEl.scrollHeight;
+};
+
+/* ---------- はじまり ---------- */
+$('modeAuto').setAttribute('aria-pressed',S.mode==='auto');$('modeTap').setAttribute('aria-pressed',S.mode==='tap');
+paintToggles();entries.forEach(render);refreshEmpty();setStatus();
+if(synth&&synth.getVoices)synth.getVoices();
+</script>
+</body>
+</html>
