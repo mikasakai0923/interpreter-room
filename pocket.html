@@ -355,8 +355,14 @@ Reply with JSON only, no code fence:
 {"lang":"ja|en|zh|nan|other|none","text":"transcript","ja":"","en":"","zh":"","nan":"","nan_tl":""}
 Fields that are not needed stay "".`;
 const CFGS=[{responseMimeType:'application/json',thinkingConfig:{thinkingLevel:'low'}},{responseMimeType:'application/json'},null];
-let cfgIdx=0,modelAlt='';
 const SPARE=['gemini-3.6-flash','gemini-3.5-flash-lite'];
+const cfgOf={};let alt={model:'',until:0};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function modelChain(){                                  // 試す順：いま調子のよいモデル → 設定のモデル → 予備
+  const list=[S.model].concat(SPARE.filter(m=>m!==S.model));
+  if(alt.model&&Date.now()<alt.until&&list.includes(alt.model)){list.splice(list.indexOf(alt.model),1);list.unshift(alt.model)}
+  return list;
+}
 
 class ApiError extends Error{constructor(msg,detail){super(msg);this.detail=detail||''}}
 function explain(status,body){
@@ -406,18 +412,27 @@ function parseReply(raw){
 async function translate(input){
   if(!S.key)throw new ApiError('設定で API キーを入れてください。');
   const parts=buildParts(input);
-  for(;;){
-    const body={system_instruction:{parts:[{text:SYS}]},contents:[{role:'user',parts}]};
-    if(CFGS[cfgIdx])body.generationConfig=CFGS[cfgIdx];
-    const r=await post(modelAlt||S.model,body,35000);
-    if(r.ok)return parseReply(r.text);
-    if(r.status===400&&cfgIdx<CFGS.length-1&&!/API key/i.test(r.text)){cfgIdx++;continue}
-    if(r.status===404){                                 // モデル名が使えないときは、予備のモデルで試す
-      const next=SPARE[SPARE.indexOf(modelAlt)+1];
-      if(next){modelAlt=next;if(next===S.model)continue;note('モデル '+S.model+' が使えないため、'+next+' で通訳します。');continue}
+  let lastErr=null;
+  for(const model of modelChain()){
+    let busyTries=0;
+    for(;;){
+      const ci=cfgOf[model]||0;
+      const body={system_instruction:{parts:[{text:SYS}]},contents:[{role:'user',parts}]};
+      if(CFGS[ci])body.generationConfig=CFGS[ci];
+      const r=await post(model,body,35000);
+      if(r.ok){
+        if(model!==S.model){if(alt.model!==model)note('混んでいるため、予備のモデル（'+model+'）で通訳しています。');alt={model,until:Date.now()+180000}}
+        else alt={model:'',until:0};
+        return parseReply(r.text);
+      }
+      if(/API key/i.test(r.text)||r.status===401||r.status===403)throw explain(r.status,r.text);
+      if(r.status===400&&ci<CFGS.length-1){cfgOf[model]=ci+1;continue}
+      lastErr=explain(r.status,r.text);
+      if(r.status>=500&&busyTries<1){busyTries++;await sleep(900);continue}   // 混雑：少し待って同じモデルでもう一度
+      break;                                                                   // だめなら次のモデルへ
     }
-    throw explain(r.status,r.text);
   }
+  throw lastErr||new ApiError('通訳できませんでした。');
 }
 
 /* ---------- 1発言の流れ ---------- */
@@ -692,7 +707,7 @@ document.querySelectorAll('[data-k]').forEach(inp=>{
   inp.addEventListener(inp.type==='checkbox'||inp.tagName==='SELECT'?'change':'input',()=>{
     const nv=inp.type==='checkbox'?inp.checked:inp.type==='range'?parseFloat(inp.value):inp.value.trim();
     setP(S,k,nv);saveS();paintOut(k);
-    if(k==='model'){cfgIdx=0;modelAlt=''}if(k==='ttsModel')ttsShape=0;if(k==='speak.nan'&&nv)unlockTts();
+    if(k==='model')alt={model:'',until:0};if(k==='ttsModel')ttsShape=0;if(k==='speak.nan'&&nv)unlockTts();
   });
 });
 $('testBtn').onclick=async()=>{
