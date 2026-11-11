@@ -25,18 +25,31 @@ const PASS = 'e2epass234';                         // テスト用の合言葉�
 const FAKES = `
   window.__spoken = [];
   try {
-    window.speechSynthesis.speak = function (u) { window.__spoken.push({ text: u.text, lang: u.lang, volume: u.volume }); };
+    window.speechSynthesis.speak = function (u) { window.__spoken.push({ text: u.text, lang: u.lang, volume: u.volume }); setTimeout(function () { u.onend && u.onend({}); }, 60); };
     window.speechSynthesis.cancel = function () {};
   } catch (e) {}
   (function () {
     var mode = window.__micMode || 'ok';
-    function FakeRec() { this.lang = ''; }
-    FakeRec.prototype.start = function () { window.__rec = this; var self = this; if (mode === 'denied') setTimeout(function () { self.onerror && self.onerror({ error: 'not-allowed' }); self.onend && self.onend(); }, 30); };
-    FakeRec.prototype.stop = function () { var self = this; setTimeout(function () { self.onend && self.onend(); }, 20); };
+    window.__recCount = 0;                                  // 聞き取りを始めた回数（聞き直しの回数を数えるため）
+    function FakeRec() { this.lang = ''; this.continuous = false; this._list = []; this._ended = false; }
+    FakeRec.prototype.start = function () {
+      window.__rec = this; window.__recCount++;
+      var self = this;
+      if (mode === 'denied') setTimeout(function () { self.onerror && self.onerror({ error: 'not-allowed' }); self._end(); }, 30);
+      if (mode === 'dead') setTimeout(function () { self._end(); }, 30);   // 何も聞き取れないまま、すぐ終わる端末
+      if (mode === 'once' && window.__recCount > 1) setTimeout(function () { self.onerror && self.onerror({ error: 'not-allowed' }); self._end(); }, 30);   // 押さずに聞き直すことを許さない端末
+    };
+    FakeRec.prototype._end = function () { if (this._ended) return; this._ended = true; this.onend && this.onend(); };
+    FakeRec.prototype.stop = function () { var self = this; setTimeout(function () { self._end(); }, 20); };
     FakeRec.prototype.abort = FakeRec.prototype.stop;
-    function result(text, fin) { var r = [{ transcript: text }]; r.isFinal = fin; return { results: [r] }; }
-    window.__hear = function (text, fin) { window.__rec.onresult(result(text, !!fin)); };
-    window.__silence = function () { window.__rec.onend(); };
+    // 実物と同じく、結果の一覧は聞き取りのあいだ増えていく。途中の文は、確定するまで同じ場所に置きかわる
+    window.__hear = function (text, fin) {
+      var rec = window.__rec, list = rec._list, last = list[list.length - 1];
+      var r = [{ transcript: text }]; r.isFinal = !!fin;
+      if (last && !last.isFinal) list[list.length - 1] = r; else list.push(r);
+      rec.onresult({ results: list.slice(), resultIndex: list.length - 1 });
+    };
+    window.__silence = function () { window.__rec._end(); };
     var value = mode === 'none' ? undefined : FakeRec;
     Object.defineProperty(window, 'SpeechRecognition', { value: value, configurable: true });
     Object.defineProperty(window, 'webkitSpeechRecognition', { value: value, configurable: true });
@@ -169,12 +182,16 @@ const check = (name, ok, extra) => {
   await a.waitForFunction(() => window.__rec && document.querySelector('#mic-btn').classList.contains('on'));
   check('マイクを押すと、聞き取り中の表示になる', (await a.getAttribute('#msg', 'placeholder')) === 'お話しください…' && (await a.getAttribute('#mic-btn', 'aria-label')) === '話し終えて送る');
   check('聞き取りには、選んだ言語を伝える', (await a.evaluate(() => window.__rec.lang)) === 'ja-JP');
+  check('「タップ」の使い方では、押すまで聞きつづけるように頼む', (await a.evaluate(() => window.__rec.continuous)) === true);
   await a.evaluate(() => window.__hear('この研究では', false));
   check('聞き取り途中の文字が、入力欄に出る', (await a.inputValue('#msg')) === 'この研究では');
   await b.waitForSelector('#people .chip .dot');
   check('話している人の名前に、印がつく', true);
   await a.screenshot({ path: path.join(SHOTS, '4-listening-ja.png') });
-  await a.evaluate(t => { window.__hear(t, true); window.__silence(); }, JA);
+  await a.evaluate(t => { window.__hear(t, true); }, JA);
+  await a.waitForTimeout(300);
+  check('文が確定しても、押すまでは送らない', (await a.inputValue('#msg')) === JA && (await a.locator('#list .msg.mine').count()) === 0);
+  await a.click('#mic-btn');                        // もう一度押して送る
   await a.waitForSelector('#list .msg.mine');
   check('話し終えると、そのまま送られて、入力欄が空になる', (await a.inputValue('#msg')) === '' && !(await a.locator('#mic-btn').getAttribute('class')).includes('on'));
 
@@ -279,6 +296,95 @@ const check = (name, ok, extra) => {
 
   /* ---------- 見た目 ---------- */
   for (const [n, p] of [['A', a], ['B', b], ['C', c], ['D', d]]) check('横にはみ出さない（' + n + '）', !(await overflow(p)));
+
+  /* ---------- マイクの2つの使い方 ---------- */
+  const recCount = p => p.evaluate(() => window.__recCount);
+  const micOn = p => p.evaluate(() => document.querySelector('#mic-btn').classList.contains('on'));
+  // 「タップ」：ブラウザの都合で途切れても、そこまでを送って聞きつづける
+  let n0 = await recCount(a);
+  await a.click('#mic-btn');
+  await a.waitForFunction(c => window.__recCount === c + 1, n0);
+  await a.evaluate(() => { window.__hear('途切れる前の文です', true); window.__silence(); });
+  await waitMain(b, '[en] 途切れる前の文です');
+  await a.waitForFunction(c => window.__recCount === c + 2, n0);
+  check('「タップ」でブラウザの都合で途切れたときは、そこまでを送って、聞きつづける', await micOn(a) && (await a.inputValue('#msg')) === '');
+  await a.evaluate(() => window.__hear('続きの文です', true));
+  await a.click('#mic-btn');
+  await waitMain(b, '[en] 続きの文です');
+  await a.waitForTimeout(600);
+  check('もう一度押すと送って、マイクが切れる（聞き直さない）', !(await micOn(a)) && (await recCount(a)) === n0 + 2);
+
+  // 切りかえ（招待の小窓）
+  await a.click('#invite-btn');
+  await a.waitForSelector('#sheet[open]');
+  check('招待の小窓に、マイクの使い方の切りかえが出る', await a.locator('#mic-block').isVisible() && (await a.getAttribute('#mode-tap', 'aria-pressed')) === 'true' && (await a.getAttribute('#mode-auto', 'aria-pressed')) === 'false');
+  await a.screenshot({ path: path.join(SHOTS, '14-mic-mode-ja.png') });
+  await a.click('#mode-auto');
+  check('「自動」を選ぶと、端末に保存される', (await a.getAttribute('#mode-auto', 'aria-pressed')) === 'true' && (await stored(a, 'ir.mic')) === 'auto');
+  await a.click('#close-btn');
+  check('「自動」のときは、マイクのボタンの説明も変わる', (await a.getAttribute('#mic-btn', 'aria-label')) === '自動で聞き取る');
+
+  // 「自動」：黙るたびに送って、聞きつづける
+  n0 = await recCount(a);
+  await a.click('#mic-btn');
+  await a.waitForFunction(c => window.__recCount === c + 1, n0);
+  check('「自動」では、1区切りずつ聞き取るように頼み、黙ると送られることを伝える', (await a.evaluate(() => window.__rec.continuous)) === false && /黙ると送られます/.test(await a.getAttribute('#msg', 'placeholder')));
+  await a.evaluate(() => { window.__hear('一つめの区切りです', true); window.__silence(); });
+  await waitMain(b, '[en] 一つめの区切りです');
+  await a.waitForFunction(c => window.__recCount === c + 2, n0);
+  check('黙ると、そこまでが送られて、聞き取りがつづく', await micOn(a));
+  await a.evaluate(() => { window.__hear('二つめの区切りです', true); window.__silence(); });
+  await waitMain(b, '[en] 二つめの区切りです');
+  await a.waitForFunction(c => window.__recCount === c + 3, n0);
+  // 読み上げは、区切りまで待つ
+  const spokenBefore = (await spoken(a)).length;
+  await a.evaluate(() => window.__hear('いま話している', false));
+  await type(b, 'A question while the host is talking');
+  await a.waitForFunction(() => [...document.querySelectorAll('#list .msg.other .main')].some(e => e.textContent.includes('[ja] A question while the host is talking')));
+  await a.waitForTimeout(400);
+  check('マイクが入っているあいだに届いた訳は、すぐには読み上げない', (await spoken(a)).length === spokenBefore);
+  await a.evaluate(() => { window.__hear('いま話している文です', true); window.__silence(); });
+  await a.waitForFunction(n => window.__spoken.filter(s => s.volume !== 0).length === n + 1, spokenBefore);
+  check('区切りが来ると、待っていた訳を読み上げる', /A question while the host is talking/.test((await spoken(a))[spokenBefore].text));
+  await a.waitForFunction(c => window.__recCount === c + 4, n0);
+  check('読み上げが終わると、また聞きはじめる', await micOn(a));
+  await a.click('#mic-btn');
+  await a.waitForTimeout(600);
+  check('「自動」でも、もう一度押すと止まる', !(await micOn(a)) && (await recCount(a)) === n0 + 4);
+
+  // 壊れている端末（何も聞き取れないまま、すぐ終わるのがつづく）では、くり返さずにやめる
+  const dead = await person(link, null, 'dead');
+  await joinAs(dead, 'ja', 'Dead');
+  await dead.click('#invite-btn');
+  await dead.click('#mode-auto');
+  await dead.click('#close-btn');
+  await dead.click('#mic-btn');
+  await dead.waitForFunction(() => !document.querySelector('#mic-btn').classList.contains('on') && /聞き取れませんでした/.test(document.querySelector('#notice').textContent), null, { timeout: 15000 });
+  check('聞き取れないまま終わるのがつづくと、くり返さずにやめて知らせる', (await recCount(dead)) <= 6, 'rec=' + (await recCount(dead)));
+  await dead.context().close();
+
+  // 押さずに聞き直すことを許さない端末では、マイクを隠さずに、押すたびに話すように知らせる
+  const once = await person(link, null, 'once');
+  await joinAs(once, 'ja', 'Once');
+  await once.click('#invite-btn');
+  await once.click('#mode-auto');
+  await once.click('#close-btn');
+  await once.click('#mic-btn');
+  await once.evaluate(() => { window.__hear('最初の区切りです', true); window.__silence(); });
+  await once.waitForFunction(() => /聞きつづけることができません/.test(document.querySelector('#notice').textContent), null, { timeout: 15000 });
+  check('聞き直しだけが断られた端末では、マイクを残して、押すたびに話すように知らせる', !(await micOn(once)) && !(await once.locator('#mic-btn').isHidden()) && (await once.locator('#list .msg.mine').count()) === 1);
+  await once.context().close();
+
+  // 切りかえは保存され、もとにもどせる
+  await a.reload();
+  await a.waitForSelector('#join:not([hidden])');
+  await a.click('#join-btn');                       // 言語と表示名は覚えている
+  await a.waitForSelector('#room:not([hidden])');
+  await a.click('#invite-btn');
+  check('開き直しても「自動」のまま', (await a.getAttribute('#mode-auto', 'aria-pressed')) === 'true');
+  await a.click('#mode-tap');
+  await a.click('#close-btn');
+  check('「タップ」にもどせる', (await stored(a, 'ir.mic')) === 'tap' && (await a.getAttribute('#mic-btn', 'aria-label')) === 'マイクで話す');
 
   /* ---------- 時間がたって、ルームが閉じたとき ---------- */
   await control('nowOffset=' + 121 * 60000);         // Google 側の時計を、2時間1分すすめる（開けておく時間は2時間）
@@ -477,7 +583,8 @@ const check = (name, ok, extra) => {
   await gh.waitForFunction(() => document.querySelectorAll('#people .chip').length === 2);
   await gh.click('#mic-btn');
   await gh.waitForFunction(() => window.__rec && document.querySelector('#mic-btn').classList.contains('on'));
-  await gh.evaluate(t => { window.__hear(t, true); window.__silence(); }, HEARD);
+  await gh.evaluate(t => window.__hear(t, true), HEARD);
+  await gh.click('#mic-btn');
   await waitMain(gl, 'This is a study of low-resource languages.');
   const gFirst = gl.locator('#list .msg.other').first();
   check('聞き手には、聞き取りの誤りを直した原文と、そこからの訳が届く', (await gFirst.locator('.orig').textContent()) === FIXED);

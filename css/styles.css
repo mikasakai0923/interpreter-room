@@ -128,7 +128,15 @@ h1, h2, p { margin: 0; }
 .mic.on .wave { display: none; }
 .mic.on .stop { display: block; }
 @keyframes ring { 0% { box-shadow: 0 0 0 0 var(--live); } 70% { box-shadow: 0 0 0 10px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.mic.auto.on { animation: ring 2.2s ease-out infinite; }
 @media (prefers-reduced-motion: reduce) { .dot, .mic.on { animation: none; } }
+/* マイクの使い方（招待の小窓の中）：2つから1つを選ぶ */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.segbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; cursor: pointer; min-height: 44px; }
+.segbtn[aria-pressed="true"] { border-color: var(--accent-text); background: var(--accent-soft); }
+.segtitle { font-weight: 700; font-size: 15px; }
+.segdesc { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.segbtn[aria-pressed="true"] .segdesc { color: var(--accent-text); }
 
 /* ---- 招待と設定の小窓 ---- */
 dialog { width: min(100%, 440px); max-width: 100%; max-height: calc(100% - 24px); margin: auto; padding: 0; border: 0; border-radius: 18px; background: var(--surface); color: var(--ink); overflow-y: auto; }

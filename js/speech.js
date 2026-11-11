@@ -25,15 +25,27 @@
     } catch (e) { return null; }
   }
 
-  function speak(text, code) {
-    if (!synth || !text) return;
+  // done があれば、読み終えたとき（または読めなかったとき）に1回だけ呼ぶ。
+  // 端末によっては「読み終えた」の合図が来ないので、文の長さに応じた時間がたったら、来たものとみなす。
+  function speak(text, code, done) {
+    var called = false, timer = 0;
+    function finish() {
+      if (called) return;
+      called = true;
+      window.clearTimeout(timer);
+      if (typeof done === 'function') done();
+    }
+    if (!synth || !text) { window.setTimeout(finish, 0); return; }
     try {
       var u = new window.SpeechSynthesisUtterance(text);
       u.lang = code;
       var v = pickVoice(code);
       if (v) u.voice = v;
+      u.onend = finish;
+      u.onerror = finish;
       synth.speak(u);
-    } catch (e) { /* 読み上げは、できる端末でだけ行う */ }
+      timer = window.setTimeout(finish, Math.min(30000, 2000 + String(text).length * 180));
+    } catch (e) { finish(); }
   }
 
   // スマートフォンでは、最初の読み上げを「画面を押した直後」に始めないと、そのあとも音が出ない。
@@ -55,24 +67,36 @@
 
   /* ---------- 聞き取り ---------- */
 
-  // opts: { lang, onText(聞き取り途中の文字), onEnd({ text, error }) }
-  // 話し終える（しばらく黙る）か、stop() を呼ぶと、onEnd が1回だけ呼ばれる。
+  // opts: { lang, keep, onText(聞き取り途中の文字), onEnd({ text, error, stopped, ms }) }
+  //   keep が false：話し終える（しばらく黙る）と、ブラウザが聞き取りを終える（1区切り）
+  //   keep が true ：stop() を呼ぶまで聞きつづける（ブラウザの都合で終わることもある）
+  // 聞き取りが終わると、onEnd が1回だけ呼ばれる。stopped は、stop() で終えたかどうか。ms は聞いていた時間。
   function listen(opts) {
-    var rec, finalText = '', interim = '', error = '', ended = false, guard = 0, stopTimer = 0;
+    var rec, committed = '', finals = [], interim = '', lastLen = 0, error = '', ended = false, stopped = false;
+    var guard = 0, stopTimer = 0, began = Date.now();
 
+    function text() { return (committed + finals.join('') + interim).trim(); }
     function finish() {
       if (ended) return;
       ended = true;
       window.clearTimeout(guard);
       window.clearTimeout(stopTimer);
-      opts.onEnd({ text: (finalText + interim).trim(), error: error });
+      opts.onEnd({ text: text(), error: error, stopped: stopped, ms: Date.now() - began });
+    }
+    // 長く何も届かないときは、こちらで区切る（端末によっては、終わりの合図が届かないことがある）
+    function arm() {
+      window.clearTimeout(guard);
+      guard = window.setTimeout(function () {
+        try { rec.stop(); } catch (e) { /* 何もしない */ }
+        stopTimer = window.setTimeout(finish, 2500);
+      }, 60000);
     }
 
     try {
       rec = new Recognition();
       rec.lang = opts.lang;
       rec.interimResults = true;
-      rec.continuous = false;
+      rec.continuous = !!opts.keep;
       rec.maxAlternatives = 1;
     } catch (e) {
       window.setTimeout(function () { error = 'start-failed'; finish(); }, 0);
@@ -80,28 +104,31 @@
     }
 
     rec.onresult = function (ev) {
-      var f = '', i = '';
-      for (var k = 0; k < ev.results.length; k++) {
-        var r = ev.results[k];
+      var list = ev.results || [];
+      // 端末によっては、途中で結果の一覧が新しくなる。そのときは、それまでに確定した文を取っておく
+      if (list.length < lastLen) { committed += finals.join(''); finals = []; }
+      lastLen = list.length;
+      var i = '';
+      for (var k = 0; k < list.length; k++) {
+        var r = list[k];
         if (!r || !r[0]) continue;
-        if (r.isFinal) f += r[0].transcript; else i += r[0].transcript;
+        if (r.isFinal) finals[k] = r[0].transcript; else i += r[0].transcript;
       }
-      finalText = f;
       interim = i;
-      opts.onText((f + i).trim());
+      arm();
+      opts.onText(text());
     };
     rec.onerror = function (ev) { error = (ev && ev.error) || 'error'; };
     rec.onend = finish;
 
     try { rec.start(); }
     catch (e) { window.setTimeout(function () { error = 'start-failed'; finish(); }, 0); }
-
-    // 端末によっては、終わりの合図が届かないことがある。長すぎるときは、こちらで区切る。
-    guard = window.setTimeout(function () { try { rec.stop(); } catch (e) { /* 何もしない */ } stopTimer = window.setTimeout(finish, 2500); }, 60000);
+    arm();
 
     return {
       stop: function () {
         if (ended) return;
+        stopped = true;
         try { rec.stop(); } catch (e) { /* 何もしない */ }
         window.clearTimeout(stopTimer);
         stopTimer = window.setTimeout(finish, 2500);
