@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'">
 <title>多言語通訳ルーム</title>
 <link rel="icon" href="images/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/styles.css?v=0.3.0">
+<link rel="stylesheet" href="css/styles.css?v=0.4.0">
 </head>
 <body>
 <div id="app" lang="ja">
@@ -90,6 +90,20 @@
         </div>
         <p class="fine" data-t="inviteNote"></p>
       </div>
+      <div class="block" id="mic-block" hidden>
+        <h3 class="lab" data-t="micMode"></h3>
+        <div class="seg" role="group">
+          <button class="segbtn" id="mode-tap" type="button" aria-pressed="true">
+            <span class="segtitle" data-t="modeTap"></span>
+            <span class="segdesc" data-t="modeTapDesc"></span>
+          </button>
+          <button class="segbtn" id="mode-auto" type="button" aria-pressed="false">
+            <span class="segtitle" data-t="modeAuto"></span>
+            <span class="segdesc" data-t="modeAutoDesc"></span>
+          </button>
+        </div>
+        <p class="fine" data-t="modeNote"></p>
+      </div>
       <div class="block">
         <button class="ghost" id="change-btn" type="button" data-t="changeLang"></button>
         <button class="ghost" id="host-btn" type="button" data-t="hostBtn" hidden></button>
@@ -117,11 +131,11 @@
   </dialog>
 </div>
 
-<script src="config.js?v=0.3.0"></script>
-<script src="vendor/qrcode.js?v=0.3.0"></script>
-<script src="js/i18n.js?v=0.3.0"></script>
-<script src="js/api.js?v=0.3.0"></script>
-<script src="js/speech.js?v=0.3.0"></script>
-<script src="js/app.js?v=0.3.0"></script>
+<script src="config.js?v=0.4.0"></script>
+<script src="vendor/qrcode.js?v=0.4.0"></script>
+<script src="js/i18n.js?v=0.4.0"></script>
+<script src="js/api.js?v=0.4.0"></script>
+<script src="js/speech.js?v=0.4.0"></script>
+<script src="js/app.js?v=0.4.0"></script>
 </body>
 </html>

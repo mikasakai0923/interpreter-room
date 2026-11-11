@@ -5,7 +5,7 @@
   var I18N = window.IR_I18N, API = window.IR_API, SPEECH = window.IR_SPEECH;
   var LANGS = I18N.LANGS, BY = I18N.BY, T = I18N.T, EX = I18N.EX;
   var CFG = window.IR_CONFIG || {};
-  var VERSION = '0.3.0';
+  var VERSION = '0.4.0';
   var CODE_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';   // gas/Code.gs の IR_CODE_CHARS と同じ
   var STALE_MS = 30000;        // これだけ待っても訳が届かない発言は、失敗として扱う
   var LIVE_MS = 15000;         // ルームが開くのを待っていた人には、これより新しい発言を「いま話されたもの」として読み上げる
@@ -62,11 +62,14 @@
     people: [], typing: false, typingTimer: 0, lastActivity: 0,
     speakOn: true, fails: 0, latency: 0,
     stateKind: 'connecting', sticky: '', flash: '', flashTimer: 0,
-    listening: null, micOk: SPEECH.canListen, wake: null
+    listening: null, micOk: SPEECH.canListen, wake: null,
+    micMode: 'tap', micOn: false, micBefore: '', micEnds: [], micTimer: 0, micAgain: false,   // マイクの使い方と、いま入っているかどうか
+    ttsQueue: [], ttsBusy: false                                            // マイクが入っているあいだに届いた、読み上げ待ちの訳
   };
   S.sid = sess.get('ir.sid') || rnd(12);
   sess.set('ir.sid', S.sid);
   S.pass = normPass(store.get('ir.pass'));
+  S.micMode = store.get('ir.mic') === 'auto' ? 'auto' : 'tap';
   var guestName = 'Guest ' + (10 + (parseInt(S.sid.slice(0, 5), 36) % 90));
 
   (function readRoom() {
@@ -102,6 +105,7 @@
   var speakToggle = $('speak-toggle'), inviteBtn = $('invite-btn'), sheet = $('sheet');
   var qrBox = $('qr'), linkInput = $('link'), copyBtn = $('copy-btn'), tech = $('tech');
   var changeBtn = $('change-btn'), clearBtn = $('clear-btn'), clearConfirm = $('clear-confirm');
+  var micBlock = $('mic-block'), modeTap = $('mode-tap'), modeAuto = $('mode-auto');
   var clearDo = $('clear-do'), clearCancel = $('clear-cancel'), clearError = $('clear-error'), closeBtn = $('close-btn');
 
   /* ---------- ことば ---------- */
@@ -270,7 +274,7 @@
   }
   function renderClosed() {
     var show = closedShown();
-    if (show && closedBox.hidden && S.listening) S.listening.stop();
+    if (show && closedBox.hidden && (S.micOn || S.listening)) stopMic();
     closedBox.hidden = !show;
     closedWhy.hidden = !S.openWhy;                   // 主催者の端末で、開けなかった理由
     closedWhy.textContent = S.openWhy ? t(S.openWhy) : '';
@@ -481,7 +485,20 @@
     var tr = trOf(m, S.lang);
     if (!tr) return;
     S.spoken[m.id] = 1;                       // 1つの発言を読むのは1回だけ。あとからまとめて読むこともしない
-    if (S.speakOn && S.inRoom) SPEECH.speak(tr, BY[S.lang].speech);
+    if (!S.speakOn || !S.inRoom) return;
+    // マイクが入っているあいだに読み上げると、その声を自分のマイクが拾ってしまう。区切りまで待つ
+    if (S.micOn || S.listening || S.ttsBusy) { S.ttsQueue.push(tr); if (S.ttsQueue.length > 6) S.ttsQueue.shift(); return; }
+    SPEECH.speak(tr, BY[S.lang].speech);
+  }
+  // 待たせていた訳を順に読み上げて、読み終えたら done を呼ぶ
+  function flushTts(done) {
+    if (!S.ttsQueue.length || !S.speakOn) { S.ttsQueue = []; done(); return; }
+    S.ttsBusy = true;
+    var text = S.ttsQueue.shift();
+    SPEECH.speak(text, BY[S.lang].speech, function () {
+      S.ttsBusy = false;
+      flushTts(done);
+    });
   }
 
   /* ---------- Google 側との連絡（数秒おき） ---------- */
@@ -710,7 +727,7 @@
 
   composer.addEventListener('submit', function (e) {
     e.preventDefault();
-    if (S.listening) return;
+    if (S.listening || S.micOn) return;
     var text = ta.value;
     ta.value = '';
     autosize();
@@ -721,66 +738,136 @@
   ta.addEventListener('input', function () {
     autosize();
     var has = !!ta.value.trim();
-    sendBtn.disabled = !has || !!S.listening;
+    sendBtn.disabled = !has || !!S.listening || S.micOn;
     setTyping(has);
   });
   ta.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' || e.shiftKey || coarse) return;
     if (e.isComposing || e.keyCode === 229) return;   // 日本語・中国語・韓国語の変換を確定する Enter では送らない
     e.preventDefault();
-    if (ta.value.trim() && !S.listening) composer.requestSubmit ? composer.requestSubmit() : sendBtn.click();
+    if (ta.value.trim() && !S.listening && !S.micOn) composer.requestSubmit ? composer.requestSubmit() : sendBtn.click();
   });
 
   /* ---------- マイクで話す ---------- */
+  // 使い方は2つ（招待の小窓で切りかえる。端末に保存される）
+  //   tap ：押して話し、もう一度押すと送る。押すまで聞きつづける（ブラウザの都合で途切れたときは、そこまでを送って聞きつづける）
+  //   auto：押したあとは、黙るたびにそこまでを送り、また聞きはじめる。もう一度押すまでくり返す
   function renderMic() {
     micBtn.hidden = !S.micOk;
-    var on = !!S.listening;
+    var on = S.micOn || !!S.listening;
+    var auto = S.micMode === 'auto';
     micBtn.classList.toggle('on', on);
+    micBtn.classList.toggle('auto', auto);
     micBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    micBtn.setAttribute('aria-label', t(on ? 'micStop' : 'micStart'));
-    micBtn.title = t(on ? 'micStop' : 'micStart');
+    var label = t(on ? (auto ? 'micAutoStop' : 'micStop') : (auto ? 'micAutoStart' : 'micStart'));
+    micBtn.setAttribute('aria-label', label);
+    micBtn.title = label;
     ta.readOnly = on;
-    ta.placeholder = t(on ? 'listening' : 'composerPh');
+    ta.placeholder = t(on ? (auto ? 'listeningAuto' : 'listening') : 'composerPh');
     sendBtn.disabled = on || closedShown() || !ta.value.trim();
   }
-  micBtn.addEventListener('click', function () {
-    if (S.listening) { S.listening.stop(); return; }
+  function renderMicMode() {
+    micBlock.hidden = !S.micOk;
+    modeTap.setAttribute('aria-pressed', S.micMode === 'tap' ? 'true' : 'false');
+    modeAuto.setAttribute('aria-pressed', S.micMode === 'auto' ? 'true' : 'false');
+  }
+  function setMicMode(mode) {
+    if (mode === S.micMode) return;
+    stopMic();
+    S.micMode = mode;
+    store.set('ir.mic', mode);
+    renderMicMode();
+    renderMic();
+  }
+  function joinBefore(text) { var b = S.micBefore; return b && text ? b + ' ' + text : b || text; }
+  // マイクを入れる（ボタンを押したとき）
+  function startMic() {
+    if (S.micOn || S.listening) return;
     SPEECH.cancel();                                // 読み上げの声を、自分のマイクが拾わないようにする
-    var before = ta.value.trim();
-    var join = function (text) { return before && text ? before + ' ' + text : before || text; };
+    S.micOn = true;
+    S.micEnds = [];
+    S.micAgain = false;
+    S.micBefore = ta.value.trim();
+    listenOnce();
+    renderMic();
+  }
+  // マイクを切る（ボタンを押したとき、言語を変えるとき、ルームが閉じたとき）
+  function stopMic() {
+    S.micOn = false;
+    window.clearTimeout(S.micTimer);
+    S.micTimer = 0;
+    if (S.listening) S.listening.stop();            // 聞き取った文は、終わりの合図のところで送られる
+    else { renderMic(); flushTts(function () {}); }
+  }
+  function listenOnce() {
     S.listening = SPEECH.listen({
       lang: BY[S.lang].speech,
+      keep: S.micMode === 'tap',
       onText: function (text) {
-        ta.value = join(text).slice(0, MAX_TEXT);
+        ta.value = joinBefore(text).slice(0, MAX_TEXT);
         autosize();
         setTyping(true);
       },
-      onEnd: function (r) {
-        S.listening = null;
-        if (r.error === 'not-allowed' || r.error === 'service-not-allowed') {
-          S.micOk = false;
-          renderMic();
-          renderState();
-          flash('micDenied', 9000);
-          return;
-        }
-        if (r.text) {
-          ta.value = '';
-          autosize();
-          setTyping(false);
-          renderMic();
-          send(join(r.text));
-          return;
-        }
-        ta.value = before;
-        autosize();
-        setTyping(!!before);
-        renderMic();
-        if (r.error && r.error !== 'no-speech' && r.error !== 'aborted') flash('micError', 6000);
-      }
+      onEnd: function (r) { micEnded(r); }
     });
+  }
+  function micEnded(r) {
+    S.listening = null;
+    if (r.error === 'not-allowed' || r.error === 'service-not-allowed') {
+      S.micOn = false;
+      if (S.micAgain) {                             // 聞き直しだけが断られた端末：押すたびに話す使い方なら使える
+        window.clearTimeout(S.micTimer);
+        S.micTimer = 0;
+        renderMic();
+        flash('micNoAgain', 9000);
+        return;
+      }
+      S.micOk = false;
+      renderMic();
+      renderMicMode();
+      renderState();
+      flash('micDenied', 9000);
+      return;
+    }
+    if (r.text) {
+      var text = joinBefore(r.text);
+      S.micBefore = '';
+      ta.value = '';
+      autosize();
+      setTyping(false);
+      send(text);
+    } else {
+      ta.value = S.micBefore;
+      autosize();
+      setTyping(!!S.micBefore);
+    }
+    var fatal = r.error && r.error !== 'no-speech' && r.error !== 'aborted' && r.error !== 'network';
+    if (S.micOn && !r.stopped && !fatal) {
+      // 聞きつづける。ただし、何も聞き取れないまま一瞬で終わるのがつづくときは、壊れているのでやめる
+      if (!r.text && r.ms < 1500) S.micEnds.push(Date.now()); else S.micEnds = [];
+      if (S.micEnds.length < 5) {
+        renderMic();
+        flushTts(function () {
+          if (!S.micOn || S.listening) return;
+          S.micTimer = window.setTimeout(function () { S.micTimer = 0; if (S.micOn && !S.listening) { S.micAgain = true; listenOnce(); } }, 250);
+        });
+        return;
+      }
+      fatal = true;
+    }
+    S.micOn = false;
+    window.clearTimeout(S.micTimer);
+    S.micTimer = 0;
     renderMic();
+    if (fatal) flash('micError', 6000);
+    flushTts(function () {});
+  }
+  micBtn.addEventListener('click', function () {
+    if (S.micOn || S.listening) stopMic(); else startMic();
   });
+  modeTap.addEventListener('click', function () { setMicMode('tap'); });
+  modeAuto.addEventListener('click', function () { setMicMode('auto'); });
+  renderMicMode();
 
   /* ---------- 入る・出る ---------- */
   function requestWake() {
@@ -904,7 +991,7 @@
   });
   changeBtn.addEventListener('click', function () {
     closeSheet();
-    if (S.listening) S.listening.stop();
+    stopMic();
     setTyping(false);
     S.inRoom = false;
     S.running = false;
