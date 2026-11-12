@@ -374,15 +374,20 @@ function explain(status,body){
   if(status>=500)return new ApiError('Google 側が混み合っています。もう一度送ってください。',m);
   return new ApiError('通訳できませんでした（'+status+'）。',m);
 }
-async function post(model,body,ms){
-  const ac=new AbortController();const timer=setTimeout(()=>ac.abort(),ms||30000);
+async function post(model,body,ms,outer){
+  const ac=new AbortController();let timedOut=false;
+  const timer=setTimeout(()=>{timedOut=true;ac.abort()},ms||30000);
+  const stop=()=>ac.abort();
+  if(outer){if(outer.aborted)ac.abort();else outer.addEventListener('abort',stop)}
   try{
     const r=await fetch(API+encodeURIComponent(model)+':generateContent',{method:'POST',signal:ac.signal,
       headers:{'Content-Type':'application/json','x-goog-api-key':S.key},body:JSON.stringify(body)});
     return {ok:r.ok,status:r.status,text:await r.text()};
   }catch(e){
-    throw new ApiError(e.name==='AbortError'?'返事が来ませんでした。電波を確かめて、もう一度送ってください。':'通信できませんでした。電波を確かめてください。',String(e.message||e));
-  }finally{clearTimeout(timer)}
+    if(timedOut)throw new ApiError('Google から返事が来ませんでした。もう一度送ってください。',model+'：'+Math.round((ms||30000)/1000)+' 秒待っても返事なし');
+    if(e.name==='AbortError')throw new ApiError('取りやめました。');
+    throw new ApiError('通信できませんでした。電波を確かめてください。',String(e.message||e));
+  }finally{clearTimeout(timer);if(outer)outer.removeEventListener('abort',stop)}
 }
 function buildParts(input){
   const targets=['en','zh','nan'].filter(l=>S.show[l]);
@@ -411,29 +416,53 @@ function parseReply(raw){
 }
 async function translate(input){
   if(!S.key)throw new ApiError('設定で API キーを入れてください。');
-  const parts=buildParts(input);
-  let lastErr=null;
-  for(const model of modelChain()){
-    let busyTries=0;
-    for(;;){
-      const ci=cfgOf[model]||0;
-      const body={system_instruction:{parts:[{text:SYS}]},contents:[{role:'user',parts}]};
-      if(CFGS[ci])body.generationConfig=CFGS[ci];
-      const r=await post(model,body,35000);
-      if(r.ok){
-        if(model!==S.model){if(alt.model!==model)note('混んでいるため、予備のモデル（'+model+'）で通訳しています。');alt={model,until:Date.now()+180000}}
+  const parts=buildParts(input),chain=modelChain(),t0=Date.now();
+  // 返事がおそいときは、待ちながら予備のモデルにも同じものを送り、先に返ってきたほうを使う
+  return new Promise((resolve,reject)=>{
+    const ctrls=[];let started=0,ended=0,settled=false,timer=0,lastErr=null;
+    const finish=(fn,v)=>{settled=true;clearTimeout(timer);ctrls.forEach(c=>c.abort());fn(v)};
+    const startNext=()=>{
+      clearTimeout(timer);
+      if(settled||started>=chain.length)return;
+      const model=chain[started++],ac=new AbortController();ctrls.push(ac);
+      askModel(model,parts,ac.signal).then(res=>{
+        if(settled)return;
+        if(model!==S.model){if(alt.model!==model)note('返事がおそいため、予備のモデル（'+model+'）で通訳しています。');alt={model,until:Date.now()+180000}}
         else alt={model:'',until:0};
-        return parseReply(r.text);
-      }
-      if(/API key/i.test(r.text)||r.status===401||r.status===403)throw explain(r.status,r.text);
-      if(r.status===400&&ci<CFGS.length-1){cfgOf[model]=ci+1;continue}
-      lastErr=explain(r.status,r.text);
-      if(r.status>=500&&busyTries<1){busyTries++;await sleep(900);continue}   // 混雑：少し待って同じモデルでもう一度
-      break;                                                                   // だめなら次のモデルへ
-    }
-  }
-  throw lastErr||new ApiError('通訳できませんでした。');
+        lastOk={model,sec:(Date.now()-t0)/1000};
+        finish(resolve,res);
+      },err=>{
+        if(settled)return;
+        ended++;
+        if(err.fatal)return finish(reject,err);
+        lastErr=err;
+        if(started<chain.length)startNext();
+        else if(ended>=started)finish(reject,lastErr);
+      });
+      if(started<chain.length)timer=setTimeout(startNext,HEDGE_MS);
+    };
+    startNext();
+  });
 }
+const HEDGE_MS=6000,REPLY_MS=25000;let lastOk=null;
+async function askModel(model,parts,signal){
+  let busyTries=0;
+  for(;;){
+    const ci=cfgOf[model]||0;
+    const body={system_instruction:{parts:[{text:SYS}]},contents:[{role:'user',parts}]};
+    if(CFGS[ci])body.generationConfig=CFGS[ci];
+    const r=await post(model,body,REPLY_MS,signal);
+    if(r.ok)return parseReply(r.text);
+    if(/API key/i.test(r.text)||r.status===401||r.status===403){const er=explain(r.status,r.text);er.fatal=true;throw er}
+    if(r.status===400&&ci<CFGS.length-1){cfgOf[model]=ci+1;continue}
+    if(r.status>=500&&busyTries<1){busyTries++;await sleep(900);continue}     // 混雑：少し待って同じモデルでもう一度
+    throw explain(r.status,r.text);                                            // だめなら次のモデルへ
+  }
+}
+/* 同時に送るのは2つまで。それより多い発言は順番を待つ */
+let active=0;const waiting=[];
+async function takeSlot(){if(active>=2)await new Promise(r=>waiting.push(r));active++}
+function freeSlot(){active--;const w=waiting.shift();if(w)w()}
 
 /* ---------- 1発言の流れ ---------- */
 let pending=0,nextSpeak=0;const order=[];
@@ -443,6 +472,7 @@ function submit(input){
 }
 async function run(e){
   e.status='pending';e.err='';e.detail='';render(e);pending++;setStatus();
+  await takeSlot();
   try{
     const r=await translate(e._in);
     if(r.lang==='none'||!r.text){e.status='none'}
@@ -453,6 +483,7 @@ async function run(e){
       e.status='done';delete e._in;
     }
   }catch(err){e.status='error';e.err=err.message||'通訳できませんでした。';e.detail=err.detail||''}
+  freeSlot();
   pending--;render(e);
   if(e.status==='none')entries=entries.filter(x=>x!==e);
   saveLog();
@@ -606,7 +637,10 @@ function cut(trim){
   let pcm=concat(V.seg);const voiced=V.voiced,silent=V.silent;
   vadReset();
   if(trim){const drop=Math.max(0,Math.floor((silent-0.25)*RATE));if(drop<pcm.length)pcm=pcm.subarray(0,pcm.length-drop)}
-  if(voiced>=0.35)submit({b64:wavBase64(pcm)});
+  if(voiced>=0.35){
+    if(waiting.length>=3)note('通訳が追いついていないため、いまの部分は送りませんでした。');   // たまりすぎを防ぐ
+    else submit({b64:wavBase64(pcm)});
+  }
   setStatus();pump();
 }
 function wavBase64(pcm){
@@ -714,7 +748,7 @@ $('testBtn').onclick=async()=>{
   const out=$('testOut');out.hidden=false;out.className='result';out.textContent='確かめています…';
   try{
     const r=await translate({text:'こんにちは。低資源言語の研究をしています。'});
-    out.textContent='つながりました。\n'+['en','zh','nan'].map(l=>r.out[l]?LANG[l].name+'：'+r.out[l]:'').filter(Boolean).join('\n');
+    out.textContent='つながりました（'+(lastOk?lastOk.model+'、'+lastOk.sec.toFixed(1)+' 秒':'')+'）。\n'+['en','zh','nan'].map(l=>r.out[l]?LANG[l].name+'：'+r.out[l]:'').filter(Boolean).join('\n');
   }catch(e){out.className='result bad';out.textContent=(e.message||'つながりませんでした。')+(e.detail?'\n'+e.detail:'')}
 };
 $('copyLog').onclick=async()=>{
